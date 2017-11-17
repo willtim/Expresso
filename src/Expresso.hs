@@ -2,7 +2,9 @@
 {-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 
 ------------------------------------------------------------
--- Expresso API (currently used by the REPL)
+-- Expresso API
+--
+-- These functions are currently used by the REPL and the test suite.
 --
 module Expresso
   ( module Expresso.Syntax
@@ -12,11 +14,13 @@ module Expresso
   , bind
   , eval
   , evalFile
+  , evalString
   , evalWithEnv
   , showType
   , showValue
   , showValue'
   , typeOf
+  , typeOfString
   , typeOfWithEnv
   ) where
 
@@ -33,18 +37,18 @@ import qualified Expresso.InferType as InferType
 import qualified Expresso.Parser as Parser
 
 
-evalFile :: HasValue a => FilePath -> IO (Either String a)
-evalFile path = runExceptT $ do
-    top <- ExceptT $ Parser.parse path <$> readFile path
-    ExceptT $ eval top
-
-typeOf :: ExpI -> IO (Either String Scheme)
-typeOf = typeOfWithEnv mempty initTIState
-
 typeOfWithEnv :: TypeEnv -> TIState -> ExpI -> IO (Either String Scheme)
 typeOfWithEnv tEnv tState ei = runExceptT $ do
     e <- Parser.resolveImports ei
     ExceptT $ return $ inferType tEnv tState e
+
+typeOf :: ExpI -> IO (Either String Scheme)
+typeOf = typeOfWithEnv mempty initTIState
+
+typeOfString :: String -> IO (Either String Scheme)
+typeOfString str = runExceptT $ do
+    top <- ExceptT $ return $ Parser.parse "<unknown" str
+    ExceptT $ typeOf top
 
 evalWithEnv :: HasValue a => (TypeEnv, TIState, Env) -> ExpI -> IO (Either String a)
 evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
@@ -55,6 +59,16 @@ evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
 
 eval :: HasValue a => ExpI -> IO (Either String a)
 eval = evalWithEnv (mempty, initTIState, mempty)
+
+evalFile :: HasValue a => FilePath -> IO (Either String a)
+evalFile path = runExceptT $ do
+    top <- ExceptT $ Parser.parse path <$> readFile path
+    ExceptT $ eval top
+
+evalString :: HasValue a => String -> IO (Either String a)
+evalString str = runExceptT $ do
+    top <- ExceptT $ return $ Parser.parse "<unknown>" str
+    ExceptT $ eval top
 
 -- used by the REPL to bind variables
 bind :: (TypeEnv, TIState, Env) -> Bind Name -> ExpI -> EvalM (TypeEnv, TIState, Env)

@@ -56,6 +56,7 @@ data Prim
   | Cond
   | FixPrim
   | FwdComp
+  | BwdComp
   | ListEmpty
   | ListCons
   | ListNull

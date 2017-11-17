@@ -274,11 +274,16 @@ tiPrim pos prim = fmap (annPos pos) $ case prim of
   FixPrim                -> do
     a <- newTyVar' 'a'
     return $ TFun (TFun a a) a
-  FwdComp                -> do
-    a <- newTyVar' 'a'
+  FwdComp                -> do -- forward composition operator
+    a <- newTyVar' 'a'         -- (a -> b) -> (b -> c) -> a -> c
     b <- newTyVar' 'b'
     c <- newTyVar' 'c'
     return $ TFun (TFun a b) (TFun (TFun b c) (TFun a c))
+  BwdComp                -> do -- backward composition operator
+    a <- newTyVar' 'a'         -- (b -> c) -> (a -> b) -> a -> c
+    b <- newTyVar' 'b'
+    c <- newTyVar' 'c'
+    return $ TFun (TFun b c) (TFun (TFun a b) (TFun a c))
   Cond                   -> do
     a <- newTyVar' 'a'
     return $ TFun TBool (TFun a (TFun a a))

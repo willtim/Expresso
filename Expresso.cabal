@@ -1,6 +1,6 @@
-Name:            Expresso
+Name:            expresso
 Version:         0.1
-Cabal-Version:   >= 1.6
+Cabal-Version:   >= 1.8
 License:         GPL-3
 License-File:    LICENSE
 Author:          Tim Williams
@@ -28,7 +28,7 @@ Library
                -fno-warn-name-shadowing
                -fno-warn-missing-pattern-synonym-signatures
 
-Executable Expresso
+Executable expresso
   Main-Is:         Repl.hs
   Hs-Source-Dirs:  src
   Other-Modules:   Expresso.Parser
@@ -44,3 +44,11 @@ Executable Expresso
                -fno-warn-unused-do-bind
                -fno-warn-name-shadowing
                -fno-warn-missing-pattern-synonym-signatures
+
+Test-Suite test-expresso
+  Type:            exitcode-stdio-1.0
+  Main-Is:         Tests.hs
+  Hs-Source-Dirs:  src
+  Build-Depends:   base, containers, hashable, mtl, parsec, wl-pprint,
+                   unordered-containers, haskeline, directory, filepath,
+                   expresso, tasty, tasty-hunit

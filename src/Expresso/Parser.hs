@@ -53,7 +53,7 @@ pPrim    = pInteger          <|>
            pDifferenceRecord <|>
            pRecord           <|>
            pVariant          <|>
-           pVariantEmbed     <|>
+           try pVariantEmbed <|>
            pList             <|>
            pString           <|>
            pPrimFun
@@ -77,7 +77,7 @@ opTable  = [ [prefix "-" Neg]
            , [binary "+" Add P.AssocLeft, binary "-" Sub P.AssocLeft]
            , [binary "++" ListAppend P.AssocLeft]
            , [binary "::" ListCons   P.AssocRight]
-           , [binary ">>" FwdComp    P.AssocRight]
+           , [binary ">>" FwdComp    P.AssocRight, binary "<<" BwdComp    P.AssocRight]
            ]
 
 pPrimFun = msum
@@ -104,7 +104,7 @@ pString = (\pos -> mkPrim pos . String) <$> getPosition <*> stringLiteral
 pBind = Arg <$> identifier
     <|> RecArg <$> pFieldPuns
 
-pLetBind = try (RecWildcard <$ reserved "{..}") <|> pBind
+pLetBind = try (RecWildcard <$ reservedOp "{..}") <|> pBind
 
 pFieldPuns = braces $ identifier `sepBy` comma
 
@@ -153,7 +153,10 @@ pCaseBody = mkCaseAlt <$> getPosition <*> pCaseAlt <*> pRest
             (reservedOp "|" *> pLam)        <|>
             (\pos -> mkPrim pos EmptyAlt) <$> getPosition
 
-pCaseAlt = (,) <$> pVariantLabel <*> (whiteSpace *> pLam) <?> "case alternative"
+pCaseAlt =
+    (try (Extend <$> pVariantLabel <*> (whiteSpace *> pLam)) <|>
+     try (Update <$> (reserved "override" *> pVariantLabel) <*> (whiteSpace *> pLam)))
+    <?> "case alternative"
 
 pVariantLabel = (:) <$> upper <*> identifier
 
@@ -170,9 +173,14 @@ mkImport pos path = withPos pos $ InR $ K $ Import path
 mkCase :: Pos -> ExpI -> ExpI -> ExpI
 mkCase pos scrutinee caseF = mkApp pos caseF [scrutinee]
 
-mkCaseAlt :: Pos -> (Label, ExpI) -> ExpI -> ExpI
-mkCaseAlt pos (l, altLamE) contE =
+mkCaseAlt :: Pos -> Entry -> ExpI -> ExpI
+mkCaseAlt pos (Extend l altLamE) contE =
     mkApp pos (mkPrim pos $ VariantElim l) [altLamE, contE]
+mkCaseAlt pos (Update l altLamE) contE =
+    mkApp pos (mkPrim pos $ VariantElim l)
+          [altLamE, mkLam pos (Arg "#r")
+                              (mkApp pos contE [mkApp pos (mkPrim pos $ VariantEmbed l)
+                                                          [withPosI pos $ EVar "#r"]])]
 
 mkVariant :: Pos -> Label -> ExpI -> ExpI
 mkVariant pos l e = mkApp pos (mkPrim pos $ VariantInject l) [e]
@@ -246,10 +254,11 @@ languageDef = emptyDef
     , P.opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
     , P.reservedOpNames= [ "=", ":", "-", "*", "/", "+"
                          , "++", "::", "|", ",", ".", "\\"
-                         , "{|", "|}", ":="
+                         , "{|", "|}", ":=", "{..}"
                          ]
-    , P.reservedNames  = ["let", "in", "if", "then", "else", "case", "True", "False", "{..}"
-                         , "error", "null", "fix", "foldr"]
+    , P.reservedNames  = ["let", "in", "if", "then", "else", "case", "override", "True", "False",
+                          "error", "null", "fix", "foldr"
+                         ]
     , P.caseSensitive  = True
     }
 

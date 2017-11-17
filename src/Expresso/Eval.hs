@@ -24,16 +24,16 @@ module Expresso.Eval(
 )
 where
 
-import Data.Monoid
+import Control.Monad.Except
 import Data.Foldable (foldrM)
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
-import Control.Monad.Except
+import Data.Monoid
 import qualified Data.HashMap.Strict as HashMap
 
 import Expresso.Syntax
 import Expresso.Pretty
-import Expresso.Utils (cata)
+import Expresso.Utils (cata, second)
 
 -- call-by-need environment
 -- A HashMap makes it easy to support record wildcards
@@ -121,13 +121,9 @@ eval env (stripPos -> e) = cata alg e env
     -- alg (Case s alts)  env = evalCase (s env) alts env
     alg (EPrim p)      _   = return $ evalPrim p
 
-    -- alg (Lit l)        _   = mkVal $ Fix $ Lit l
-    -- alg (Prim1 p x)    env = lift1 (evalPrim1 p) (x env)
-    -- alg (Prim2 p x y)  env = lift2 (evalPrim2 p) (x env) (y env)
-
 evalApp :: Value -> Thunk -> EvalM Value
 evalApp (VLam f)   t  = f t
-evalApp fv         _  = throwError $ "Expected a function, but got: " ++ show (ppValue fv) -- TODO check formatting
+evalApp fv         _  = throwError $ "Expected a function, but got: " ++ show (ppValue fv)
 
 evalPrim :: Prim -> Value
 evalPrim p = case p of
@@ -141,17 +137,23 @@ evalPrim p = case p of
         throwError $ "error: " ++ msg
     Neg      -> VLam $ \x ->
         VInt <$> (negate <$> proj' x)
-    Add      -> VLam $ \x -> return $ VLam $ \y ->
-        VInt <$> ((+) <$> proj' x <*> proj' y)
+    Add      -> binOp VInt (+)
+    Sub      -> binOp VInt (-)
+    Mul      -> binOp VInt (*)
+    Div      -> binOp VInt div
     Cond     -> VLam $ \c -> return $ VLam $ \t -> return $ VLam $ \f ->
         proj' c >>= \c -> if c then force t else force f
     FixPrim    -> VLam $ \f -> force f >>= \f' -> fix (evalApp f' <=< mkThunk)
-    -- Can we define operators like this in the language?
+
+    -- We cannot yet define operators like this in the language
     FwdComp    -> VLam $ \f -> force f >>= \f' ->
                   return $ VLam $ \g -> force g >>= \g' ->
                   return $ VLam $ \x ->
                       mkThunk (evalApp f' x) >>= evalApp g'
-
+    BwdComp    -> VLam $ \f -> force f >>= \f' ->
+                  return $ VLam $ \g -> force g >>= \g' ->
+                  return $ VLam $ \x ->
+                      mkThunk (evalApp g' x) >>= evalApp f'
     ListEmpty  -> VList []
     ListNull   -> VLam $ \xs -> -- TODO
         (VBool . (null :: [Value] -> Bool)) <$> proj' xs
@@ -190,65 +192,9 @@ evalPrim p = case p of
             v -> throwError $ "Expected a variant, but got: " ++ show (ppValue v)
     p -> error $ "Unsupported Prim: " ++ show p
 
-proj' :: HasValue a => Thunk -> EvalM a
-proj' = force >=> proj
-
-class HasValue a where
-    proj :: Value -> EvalM a
-    inj  :: a -> Value
-
-instance HasValue Value where
-    proj v        = return v
-    inj           = id
-
-instance HasValue Integer where
-    proj (VInt i) = return i
-    proj v        = failProj "VInt" v
-    inj           = VInt
-
-instance HasValue Bool where
-    proj (VBool b) = return b
-    proj v         = failProj "VBool" v
-    inj            = VBool
-
-instance HasValue Char where
-    proj (VChar c) = return c
-    proj v         = failProj "VChar" v
-    inj            = VChar
-
--- instance (HasValue a, HasValue b) => HasValue (a, b) where
---     proj (VTuple [a, b]) = (,) <$> proj a <*> proj b
---     proj v               = failProj "VTuple2" v
---     inj                  = \(a, b) -> VTuple [inj a, inj b]
-
-instance {-# OVERLAPS #-} HasValue String where
-    proj (VString s) = return s
-    proj v           = failProj "VString" v
-    inj              = VString
-
-instance HasValue a => HasValue [a] where
-    proj (VList xs) = mapM proj xs
-    proj v          = failProj "VList" v
-    inj             = VList . map inj
-
-instance {-# OVERLAPS #-} HasValue [Value] where
-    proj (VList xs)  = return xs
-    proj (VString s) = return $ map VChar s
-    proj v           = failProj "VList" v
-    inj              = VList
-
-instance HasValue a => HasValue (HashMap Name a) where
-    proj (VRecord m) = mapM proj' m
-    proj v           = failProj "VRecord" v
-    inj              = VRecord . fmap (Thunk . return . inj)
-
-instance {-# OVERLAPS #-} HasValue (HashMap Name Thunk) where
-    proj (VRecord m) = return m
-    proj v           = failProj "VRecord" v
-    inj              = VRecord
-
-failProj :: String -> Value -> EvalM a
-failProj desc v = throwError $ "Expected a " ++ desc ++ ", but got: " ++ show (ppValue v)
+binOp :: HasValue a => (a -> Value) -> (a -> a -> a) -> Value
+binOp c op = VLam $ \x -> return $ VLam $ \y ->
+    c <$> (op <$> proj' x <*> proj' y)
 
 -- non-strict bind
 bind :: Env -> Bind Name -> Thunk -> EvalM Env
@@ -273,3 +219,71 @@ lookupValue :: Env -> Name -> EvalM Thunk
 lookupValue env n = maybe err return $ HashMap.lookup n env
   where
     err = throwError $ "Not found: " ++ show n
+
+------------------------------------------------------------
+-- HasValue class and instances
+
+class HasValue a where
+    proj :: Value -> EvalM a
+    inj  :: a -> Value
+
+instance HasValue Value where
+    proj v        = return v
+    inj           = id
+
+instance HasValue Integer where
+    proj (VInt i) = return i
+    proj v        = failProj "VInt" v
+    inj           = VInt
+
+instance HasValue Bool where
+    proj (VBool b) = return b
+    proj v         = failProj "VBool" v
+    inj            = VBool
+
+instance HasValue Char where
+    proj (VChar c) = return c
+    proj v         = failProj "VChar" v
+    inj            = VChar
+
+instance {-# OVERLAPS #-} HasValue String where
+    proj (VString s) = return s
+    proj v           = failProj "VString" v
+    inj              = VString
+
+instance HasValue a => HasValue [a] where
+    proj (VList xs) = mapM proj xs
+    proj v          = failProj "VList" v
+    inj             = VList . map inj
+
+instance {-# OVERLAPS #-} HasValue [Value] where
+    proj (VList xs)  = return xs
+    proj (VString s) = return $ map VChar s
+    proj v           = failProj "VList" v
+    inj              = VList
+
+instance HasValue a => HasValue (HashMap Name a) where
+    proj (VRecord m) = mapM proj' m
+    proj v           = failProj "VRecord" v
+    inj              = VRecord . fmap (Thunk . return . inj)
+
+instance {-# OVERLAPS #-} HasValue a => HasValue [(Name, a)] where
+    proj (VRecord m) = mapM (mapM proj') $ HashMap.toList m
+    proj v           = failProj "VRecord" v
+    inj              = VRecord . HashMap.fromList . map (second $ Thunk . return . inj)
+
+instance {-# OVERLAPS #-} HasValue (HashMap Name Thunk) where
+    proj (VRecord m) = return m
+    proj v           = failProj "VRecord" v
+    inj              = VRecord
+
+instance {-# OVERLAPS #-} HasValue [(Name, Thunk)] where
+    proj (VRecord m) = return $ HashMap.toList m
+    proj v           = failProj "VRecord" v
+    inj              = VRecord . HashMap.fromList
+
+proj' :: HasValue a => Thunk -> EvalM a
+proj' = force >=> proj
+
+failProj :: String -> Value -> EvalM a
+failProj desc v = throwError $ "Expected a " ++ desc ++ ", but got: " ++ show (ppValue v)
