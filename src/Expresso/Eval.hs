@@ -72,6 +72,7 @@ data Value
   | VBool    !Bool
   | VChar    !Char
   | VString  !String  -- an optimisation
+  | VMaybe   !(Maybe Value)
   | VList    ![Value] -- lists are strict
   | VRecord  ![Label] !(HashMap Label Thunk) -- maintain field order
   | VVariant !Label !Thunk
@@ -84,6 +85,7 @@ ppValue (VDbl  d)   = double d
 ppValue (VBool b)   = if b then "True" else "False"
 ppValue (VChar c)   = text $ c : []
 ppValue (VString s) = dquotes $ text s
+ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppValue v) mx
 ppValue (VList xs)
     | Just str <- mapM extractChar xs = dquotes $ text str
     | otherwise     = bracketsList $ map ppValue xs
@@ -209,8 +211,16 @@ evalPrim pos p = case p of
         return $ VLam $ \x ->
             mkThunk (evalApp pos g x) >>= evalApp pos f
 
+    JustPrim      -> mkStrictLam $ \v -> return $ VMaybe (Just v)
+    NothingPrim   -> VMaybe Nothing
+    MaybePrim     -> VLam $ \x -> return $ mkStrictLam2 $ \f v ->
+        case v of
+            VMaybe (Just v') -> evalApp pos f (Thunk $ return v')
+            VMaybe Nothing   -> force x
+            _                -> failOnValues pos [v]
+
     ListEmpty     -> VList []
-    ListNull      -> VLam $ \xs -> -- TODO
+    ListNull      -> VLam $ \xs ->
         (VBool . (null :: [Value] -> Bool)) <$> proj' xs
     ListCons      -> VLam $ \x -> return $ VLam $ \xs ->
         VList <$> ((:) <$> force x <*> proj' xs)
@@ -297,6 +307,11 @@ equalValues _ (VDbl d1)    (VDbl d2)    = return $ d1 == d2
 equalValues _ (VBool b1)   (VBool b2)   = return $ b1 == b2
 equalValues _ (VChar c1)   (VChar c2)   = return $ c1 == c2
 equalValues _ (VString s1) (VString s2) = return $ s1 == s2
+equalValues p (VMaybe m1)  (VMaybe m2)  =
+    case (m1, m2) of
+      (Just v1, Just v2) -> equalValues p v1 v2
+      (Nothing, Nothing) -> return True
+      _                  -> return False
 equalValues p (VList xs)   (VList ys)
     | length xs == length ys = and <$> zipWithM (equalValues p) xs ys
     | otherwise = return False
@@ -320,6 +335,12 @@ compareValues _ (VDbl d1)    (VDbl d2)    = return $ compare d1 d2
 compareValues _ (VBool b1)   (VBool b2)   = return $ compare b1 b2
 compareValues _ (VChar c1)   (VChar c2)   = return $ compare c1 c2
 compareValues _ (VString s1) (VString s2) = return $ compare s1 s2
+compareValues p (VMaybe m1)  (VMaybe m2)  =
+    case (m1, m2) of
+      (Just v1, Just v2) -> compareValues p v1 v2
+      (Nothing, Nothing) -> return EQ
+      (Nothing, Just{} ) -> return LT
+      (Just{} , Nothing) -> return GT
 compareValues p (VList xs)   (VList ys)   = go xs ys
   where
     go :: [Value] -> [Value] -> EvalM Ordering
@@ -375,6 +396,10 @@ instance HasValue Bool where
 instance HasValue Char where
     proj (VChar c) = return c
     proj v         = failProj "VChar" v
+
+instance HasValue a => HasValue (Maybe a) where
+    proj (VMaybe m) = mapM proj m
+    proj v          = failProj "VMaybe" v
 
 instance {-# OVERLAPS #-} HasValue String where
     proj (VString s) = return s
