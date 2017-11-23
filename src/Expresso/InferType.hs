@@ -297,8 +297,7 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
 
   Not                    -> return $ TFun TBool TBool
 
-  Eq                     ->
-      binOp <$> newTyVarWith' (Star CEq) 'a'
+  Eq                     -> binOpB <$> newTyVarWith' (Star CEq) 'a'
 
   Double                 -> return $ TFun TInt TDbl
   Floor                  -> return $ TFun TDbl TInt
@@ -387,6 +386,7 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
                   --  (a -> b) -> (<r> -> b) -> <l:a|r> -> b
 
   where
+    binOpB ty = TFun ty (TFun ty TBool)
     binOp ty = TFun ty (TFun ty ty)
     unOp ty  = TFun ty ty
 
