@@ -28,7 +28,7 @@ Expresso the library and executable (the REPL) is currently built and tested usi
 
 Expresso records are built upon row-types with row extension as the fundamental primitive. This gives a very simple and easy-to-use type system when compared to more advanced systems built upon concatenation as a primitive. However, even in this simple system, concatenation can be encoded quite easily using difference records.
 
-Records can of course be contain arbitrary types and be arbitrarily nested. They can also be compared for equality and ordering. The dot operator (select) is used to project out values.
+Records can of course contain arbitrary types and be arbitrarily nested. They can also be compared for equality and ordering. The dot operator (select) is used to project out values.
 
     Expresso REPL
     Type :help or :h for a list of commands
