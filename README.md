@@ -43,7 +43,7 @@ Records can of course contain arbitrary types and be arbitrarily nested. They ca
 
 ### Record extension
 
-Records are eliminated using selection (.) and introduced using extension. For example, the record literal:
+Records are eliminated using selection `.` and introduced using extension `|`. For example, the record literal:
 
     {x = 1, y = True}
 
@@ -84,7 +84,7 @@ Note that the function definition for `sqmag` above makes use of field punning. 
 
 ### Record restriction
 
-We can remove a field by using the restriction primitive (\). For example, the following will type-check:
+We can remove a field by using the restriction primitive `\`. For example, the following will type-check:
 
     {x = 1 | {x = 2}\x}
 
@@ -95,7 +95,7 @@ We can also use the following syntactic sugar, for such an override:
 
 ### Records as modules
 
-Records can be used as a simple module system. For example, imagine a module "List.x" with derived operations on lists:
+Records can be used as a simple module system. For example, imagine a module `"List.x"` with derived operations on lists:
 
     let
         intercalate = xs: xss: concat (intersperse xs xss);
@@ -106,7 +106,7 @@ Records can be used as a simple module system. For example, imagine a module "Li
        , ...
        }
 
-Such a module can be imported using a let declaration:
+Such a module can be imported using a `let` declaration:
 
     λ> let list = import "List.x"
     λ> :type list.intercalate
@@ -161,7 +161,7 @@ The above case expression eliminates a *closed* variant, meaning any value other
     λ> f Baz{}
     42
 
-Here the unmatched variant is bound to a variable (e.g. "otherwise") and can be either ignored or delegated to another function.
+Here the unmatched variant is bound to a variable (i.e. `otherwise`) and can be either ignored or delegated to another function.
 
 The dual of record restriction is variant embedding. This allows us to restrict the behaviour exposed by a case expression, by exploiting the non-overlapping field constraints.
 For example, to prevent use of the `Bar` alternative of function `f` above, we can define a new function `g` as follows:
@@ -192,8 +192,8 @@ Expresso uses lazy evaluation in the hope that it might lead to efficiency gains
 
 ## Turing equivalence?
 
-Turing equivalence is introduced via a single "fix" primitive , which can be easily removed or disabled.
-Fix can be useful to achieve open recursive records and dynamic binding (ala. Nix).
+Turing equivalence is introduced via a single `fix` primitive, which can be easily removed or disabled.
+`fix` can be useful to achieve open recursive records and dynamic binding (à la Nix).
 
         λ> let r = mkOverridable (self: {x = "foo", y = self.x ++ "bar"})
         λ> r
