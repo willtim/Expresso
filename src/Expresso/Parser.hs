@@ -65,6 +65,7 @@ pVar     = mkVar <$> getPosition <*> identifier
 pPrim    = pNumber           <|>
            pBool             <|>
            pChar             <|>
+           pMaybe            <|>
            pDifferenceRecord <|>
            pRecord           <|>
            pVariant          <|>
@@ -118,9 +119,10 @@ opTable  = [ [ prefix "-" Neg
 pPrimFun = msum
   [ fun "error"   ErrorPrim
   , fun "show"    Show
+  , fun "maybe"   MaybePrim
+  , fun "foldr"   ListFoldr
   , fun "null"    ListNull
   , fun "fix"     FixPrim
-  , fun "foldr"   ListFoldr
   , fun "double"  Double
   , fun "floor"   Floor
   , fun "ceiling" Ceiling
@@ -217,6 +219,9 @@ pCaseAlt =
     <?> "case alternative"
 
 pVariantLabel = (:) <$> upper <*> identifier
+
+pMaybe =  (\pos e -> mkApp pos (mkPrim pos JustPrim) [e]) <$> getPosition <*> (reserved "Just" *> pTerm)
+      <|> (\pos   -> mkPrim pos NothingPrim) <$> getPosition <* reserved "Nothing"
 
 pList = brackets pListBody
   where
@@ -327,7 +332,8 @@ languageDef = emptyDef
                          , "++", "::", "|", ",", ".", "\\"
                          , "{|", "|}", ":=", "{..}"
                          ]
-    , P.reservedNames  = ["let", "in", "if", "then", "else", "case", "True", "False"
+    , P.reservedNames  = [ "let", "in", "if", "then", "else", "case"
+                         , "True", "False", "Just", "Nothing"
                          ]
     , P.caseSensitive  = True
     }

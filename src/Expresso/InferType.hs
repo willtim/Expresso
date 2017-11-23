@@ -131,6 +131,7 @@ mgu TInt TInt = return nullSubst
 mgu TDbl TDbl = return nullSubst
 mgu TBool TBool = return nullSubst
 mgu TChar TChar = return nullSubst
+mgu (TMaybe u) (TMaybe v) = mgu u v
 mgu (TList u) (TList v) = mgu u v
 mgu (TRecord row1) (TRecord row2) = mgu row1 row2
 mgu (TVariant row1) (TVariant row2) = mgu row1 row2
@@ -321,6 +322,16 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
     b <- newTyVar' 'b'
     c <- newTyVar' 'c'
     return $ TFun (TFun b c) (TFun (TFun a b) (TFun a c))
+  JustPrim               -> do
+    a <- newTyVar' 'a'
+    return $ TFun a (TMaybe a)
+  NothingPrim            -> do
+    a <- newTyVar' 'a'
+    return $ TMaybe a
+  MaybePrim              -> do
+    a <- newTyVar' 'a'
+    b <- newTyVar' 'b'
+    return $ TFun b (TFun (TFun a b) (TFun (TMaybe a) b))
   Cond                   -> do
     a <- newTyVar' 'a'
     return $ TFun TBool (TFun a (TFun a a))

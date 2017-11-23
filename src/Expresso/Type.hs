@@ -41,6 +41,7 @@ data TypeF r
   | TBoolF
   | TCharF
   | TFunF r r
+  | TMaybeF r
   | TListF r
   | TRecordF r
   | TVariantF r
@@ -97,6 +98,8 @@ pattern TChar              <- (proj -> TCharF) where
   TChar = inj TCharF
 pattern TFun t1 t2         <- (proj -> (TFunF t1 t2)) where
   TFun t1 t2 = inj (TFunF t1 t2)
+pattern TMaybe t           <- (proj -> (TMaybeF t)) where
+  TMaybe t = inj (TMaybeF t)
 pattern TList t            <- (proj -> (TListF t)) where
   TList t = inj (TListF t)
 pattern TRecord t          <- (proj -> (TRecordF t)) where
@@ -200,6 +203,9 @@ satisfies t c =
     infer TBool     = Star COrd
     infer TChar     = Star COrd
     infer TFun{}    = Star None
+    infer (TMaybe t) =
+        let Star c = infer t
+        in Star (min c COrd)
     infer (TList t) =
         let Star c = infer t
         in Star (min c COrd)
@@ -237,6 +243,7 @@ ppType TDbl         = "Double"
 ppType TBool        = "Bool"
 ppType TChar        = "Char"
 ppType (TFun t s)   = ppParenType t <+> "->" <+> ppType s
+ppType (TMaybe t)   = "Maybe" <+> ppType t
 ppType (TList a)    = brackets $ ppType a
 ppType (TRecord r)  = braces $ ppRowType r
 ppType (TVariant r) = angles $ ppRowType r

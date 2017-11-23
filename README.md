@@ -16,7 +16,7 @@ Expresso has the following features:
 - Lazy evaluation
 - Convenient use from Haskell (a type class for marshalling values)
 - Nix-style lambda syntax
-- Built-in support for ints, double, bools, chars and lists
+- Built-in support for ints, double, bools, chars, maybes and lists
 
 
 ## Installation
