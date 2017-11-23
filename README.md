@@ -6,7 +6,7 @@ A simple expressions language with polymorphic extensible row types.
 ## Introduction
 
 Expresso is a minimal statically-typed functional programming language, designed with embedding and/or extensibility in mind.
-Possible use cases for such a minimal language include configuration (ala. Nix) or as a starting point for a custom external DSL.
+Possible use cases for such a minimal language include configuration (à la Nix) or as a starting point for a custom external DSL.
 
 Expresso has the following features:
 
@@ -197,7 +197,7 @@ Turing equivalence is introduced via a single `fix` primitive, which can be easi
 
         λ> let r = mkOverridable (self: {x = "foo", y = self.x ++ "bar"})
         λ> r
-       {override_ = <Lambda>, x = "foo", y = "foobar"}
+        {override_ = <Lambda>, x = "foo", y = "foobar"}
 
-       λ> override r {| x := "baz" |}
-       {override_ = <Lambda>, x = "baz", y = "bazbar"}
+        λ> override r {| x := "baz" |}
+        {override_ = <Lambda>, x = "baz", y = "bazbar"}

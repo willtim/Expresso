@@ -32,13 +32,15 @@ import Control.Monad.Except
 import Data.Foldable (foldrM)
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
+import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Strict as HashMap
+import qualified Data.List as List
 
 import Expresso.Syntax
 import Expresso.Type
 import Expresso.Pretty
-import Expresso.Utils (cata, second, (:*:)(..), K(..))
+import Expresso.Utils (cata, (:*:)(..), K(..))
 
 -- call-by-need environment
 -- A HashMap makes it easy to support record wildcards
@@ -71,7 +73,7 @@ data Value
   | VChar    !Char
   | VString  !String  -- an optimisation
   | VList    ![Value] -- lists are strict
-  | VRecord  !(HashMap Label Thunk)
+  | VRecord  ![Label] !(HashMap Label Thunk) -- maintain field order
   | VVariant !Label !Thunk
 
 -- | This does *not* evaluate deeply
@@ -84,18 +86,18 @@ ppValue (VChar c)   = text $ c : []
 ppValue (VString s) = dquotes $ text s
 ppValue (VList xs)
     | Just str <- mapM extractChar xs = dquotes $ text str
-    | otherwise       = bracketsList $ map ppValue xs
-ppValue (VRecord r) = bracesList $ map ppEntry $ HashMap.toList r
+    | otherwise     = bracketsList $ map ppValue xs
+ppValue (VRecord ls _) = bracesList $ map ppEntry ls
   where
-    ppEntry (l, _) = text l <+> "=" <+> "<Thunk>"
+    ppEntry l = text l <+> "=" <+> "<Thunk>"
 ppValue (VVariant l _) = text l <+> "<Thunk>"
 
 -- | This evaluates deeply
 ppValue' :: Value -> EvalM Doc
-ppValue' (VRecord m) = (braces . sepBy comma . map ppEntry . HashMap.toList)
-                       <$> mapM (force >=> ppValue') m
+ppValue' (VRecord ls m) = (bracesList . zipWith ppEntry ls . recordValues ls)
+                          <$> mapM (force >=> ppValue') m
   where
-    ppEntry (l, v) = text l <+> text "=" <+> v
+    ppEntry l v = text l <+> text "=" <+> v
 ppValue' (VVariant l t) = (text l <+>) <$> (force >=> ppValue') t
 ppValue' v = return $ ppValue v
 
@@ -221,15 +223,19 @@ evalPrim pos p = case p of
         z'  <- force z
         xs' <- proj' xs :: EvalM [Value]
         foldrM g z' xs'
-    RecordExtend l   -> VLam $ \v -> return $ VLam $ \r ->
-        (VRecord . HashMap.insert l v) <$> proj' r
-    RecordRestrict l -> VLam $ \r ->
-        (VRecord . HashMap.delete l) <$> proj' r
+    RecordExtend l   -> VLam $ \v -> return $ mkStrictLam $ \r ->
+        case r of
+          VRecord ls m -> return $ VRecord (l:ls) (HashMap.insert l v m)
+          _ -> failOnValues pos [r]
+    RecordRestrict l -> mkStrictLam $ \r ->
+        case r of
+          VRecord ls m -> return $ VRecord (List.delete l ls) (HashMap.delete l m)
+          _ -> failOnValues pos [r]
     RecordSelect l   -> VLam $ \r -> do
         r' <- proj' r
         let err = throwError $ show pos ++ " : " ++ l ++ " not found"
         maybe err force (HashMap.lookup l r')
-    RecordEmpty -> VRecord mempty
+    RecordEmpty -> VRecord [] mempty
     VariantInject l  -> VLam $ \v ->
         return $ VVariant l v
     VariantEmbed _   -> VLam force
@@ -255,9 +261,9 @@ bind' env b t = do
   case (b, v) of
     (Arg n, _)               ->
         return $ HashMap.insert n (Thunk $ return v) env
-    (RecArg ns, VRecord m) | Just vs <- mapM (`HashMap.lookup` m) ns ->
-        return $ env <> (HashMap.fromList $ zip ns vs)
-    (RecWildcard, VRecord m) ->
+    (RecArg ns, VRecord _ m) ->
+        return $ env <> (HashMap.fromList $ zip ns $ recordValues ns m)
+    (RecWildcard, VRecord _ m) ->
         return $ env <> m
     _ -> throwError $ "Cannot bind the pair: " ++ show b ++ " = " ++ show (ppValue v)
 
@@ -294,12 +300,14 @@ equalValues _ (VString s1) (VString s2) = return $ s1 == s2
 equalValues p (VList xs)   (VList ys)
     | length xs == length ys = and <$> zipWithM (equalValues p) xs ys
     | otherwise = return False
-equalValues p (VRecord m1) (VRecord m2) = do
-    (ls1, vs1) <- unzip . HashMap.toList <$> mapM force m1
-    (ls2, vs2) <- unzip . HashMap.toList <$> mapM force m2
-    if ls1 == ls2 && length vs1 == length vs2
+equalValues p (VRecord ls1 m1) (VRecord ls2 m2)
+    | ls1 == ls2 = do
+    vs1 <- recordValues ls1 <$> mapM force m1
+    vs2 <- recordValues ls2 <$> mapM force m2
+    if length vs1 == length vs2
        then and <$> zipWithM (equalValues p) vs1 vs2
        else return False
+    | otherwise = return False
 equalValues p (VVariant l1 v1) (VVariant l2 v2)
     | l1 == l2  = join $ equalValues p <$> force v1 <*> force v2
     | otherwise = return False
@@ -323,9 +331,9 @@ compareValues p (VList xs)   (VList ys)   = go xs ys
           if c == EQ
               then go xs' ys'
               else return c
-compareValues p (VRecord m1) (VRecord m2) = do
-    (ls1, vs1) <- unzip . HashMap.toList <$> mapM force m1
-    (ls2, vs2) <- unzip . HashMap.toList <$> mapM force m2
+compareValues p (VRecord ls1 m1) (VRecord ls2 m2) = do
+    vs1 <- recordValues ls1 <$> mapM force m1
+    vs2 <- recordValues ls2 <$> mapM force m2
     let c = compare ls1 ls2
     if c == EQ
        then compareValues p (VList vs1) (VList vs2)
@@ -337,73 +345,63 @@ compareValues p (VVariant l1 v1) (VVariant l2 v2) =
         else return c
 compareValues p v1 v2 = failOnValues p [v1, v2]
 
+-- | Used for ordering and pretty-printing of records
+recordValues :: [Label] -> HashMap Label a -> [a]
+recordValues ls m = fromMaybe err $ mapM (\l -> HashMap.lookup l m) ls
+  where
+    err = error "recordValues: assertion failed"
 
 ------------------------------------------------------------
 -- HasValue class and instances
 
 class HasValue a where
     proj :: Value -> EvalM a
-    inj  :: a -> Value
 
 instance HasValue Value where
     proj v        = return v
-    inj           = id
 
 instance HasValue Integer where
     proj (VInt i) = return i
     proj v        = failProj "VInt" v
-    inj           = VInt
 
 instance HasValue Double where
     proj (VDbl d) = return d
     proj v        = failProj "VDbl" v
-    inj           = VDbl
 
 instance HasValue Bool where
     proj (VBool b) = return b
     proj v         = failProj "VBool" v
-    inj            = VBool
 
 instance HasValue Char where
     proj (VChar c) = return c
     proj v         = failProj "VChar" v
-    inj            = VChar
 
 instance {-# OVERLAPS #-} HasValue String where
     proj (VString s) = return s
     proj v           = failProj "VString" v
-    inj              = VString
 
 instance HasValue a => HasValue [a] where
     proj (VList xs) = mapM proj xs
     proj v          = failProj "VList" v
-    inj             = VList . map inj
 
 instance {-# OVERLAPS #-} HasValue [Value] where
     proj (VList xs)  = return xs
     proj (VString s) = return $ map VChar s
     proj v           = failProj "VList" v
-    inj              = VList
 
 instance HasValue a => HasValue (HashMap Name a) where
-    proj (VRecord m) = mapM proj' m
-    proj v           = failProj "VRecord" v
-    inj              = VRecord . fmap (Thunk . return . inj)
+    proj (VRecord _ m) = mapM proj' m
+    proj v             = failProj "VRecord" v
 
 instance {-# OVERLAPS #-} HasValue a => HasValue [(Name, a)] where
-    proj (VRecord m) = mapM (mapM proj') $ HashMap.toList m
-    proj v           = failProj "VRecord" v
-    inj              = VRecord . HashMap.fromList . map (second $ Thunk . return . inj)
+    proj v             = HashMap.toList <$> proj v
 
 instance {-# OVERLAPS #-} HasValue (HashMap Name Thunk) where
-    proj (VRecord m) = return m
-    proj v           = failProj "VRecord" v
-    inj              = VRecord
+    proj (VRecord _ m) = return m
+    proj v             = failProj "VRecord" v
 
 instance {-# OVERLAPS #-} HasValue [(Name, Thunk)] where
-    proj (VRecord m) = return $ HashMap.toList m
-    proj v           = failProj "VRecord" v
-    inj              = VRecord . HashMap.fromList
+    proj v             = HashMap.toList <$> proj v
 
 failProj :: String -> Value -> EvalM a
 failProj desc v = throwError $ "Expected a " ++ desc ++
