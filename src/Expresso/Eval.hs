@@ -375,6 +375,27 @@ recordValues ls m = fromMaybe err $ mapM (\l -> HashMap.lookup l m) ls
 ------------------------------------------------------------
 -- HasValue class and instances
 
+class Inject a where
+    inj :: a -> Value
+instance Inject Integer where
+    inj = VInt
+instance Inject Double where
+    inj = VDbl
+instance Inject Char where
+    inj = VChar
+
+-- TODO generic derivation a la GG
+
+-- TODO write pure evaluator in ST, carry type in class to get rid of Either/Maybe to get
+--    instance (Inject a, HasValue b) => HasValue (a -> b) where
+instance (Inject a, HasValue b) => HasValue (a -> EvalM b) where
+    proj (VLam f) = pure $ \x -> do
+      x <- (mkThunk $ pure $ inj x)
+      r <- f x
+      proj r
+    proj v        = failProj "VLam" v
+
+
 class HasValue a where
     proj :: Value -> EvalM a
 
