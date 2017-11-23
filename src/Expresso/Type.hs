@@ -14,6 +14,9 @@
 {-# LANGUAGE ViewPatterns #-}
 module Expresso.Type where
 
+import Text.Parsec (SourcePos)
+import Text.Parsec.Pos (newPos)
+
 import qualified Data.Map as M
 import qualified Data.IntMap as IM
 import qualified Data.Set as S
@@ -22,8 +25,11 @@ import Data.Foldable (fold)
 import Data.Monoid
 
 import Expresso.Pretty
-import Expresso.Syntax
 import Expresso.Utils
+
+type Pos    = SourcePos
+type Label  = String
+type Name   = String
 
 type Type = Fix (TypeF :*: K Pos)
 type Type' = Fix TypeF
@@ -31,6 +37,7 @@ type Type' = Fix TypeF
 data TypeF r
   = TVarF TyVar
   | TIntF
+  | TDblF
   | TBoolF
   | TCharF
   | TFunF r r
@@ -44,15 +51,23 @@ data TypeF r
 data TyVar = TyVar
   { tyvarName       :: Name
   , tyvarUnique     :: Int
-  , tyvarKind       :: Kind
   , tyvarConstraint :: Constraint
   } deriving (Eq, Ord, Show)
 
--- | row type variables may have constraints
-data Kind = Star | Row deriving (Eq, Ord, Show)
+-- | Type variable constraints
+-- e.g. for types of kind row, labels the associated tyvar must lack
+data Constraint
+    = Row  (S.Set Label)
+    | Star StarHierarchy
+    deriving (Eq, Ord, Show)
 
--- | labels the associated tyvar must lack, for types of kind row
-type Constraint = S.Set Label
+-- | A simple hierarchy. i.e. Num has Ord and Eq, Ord has Eq.
+data StarHierarchy
+    = None
+    | CEq
+    | COrd
+    | CNum
+    deriving (Eq, Ord, Show)
 
 data Scheme = Scheme [TyVar] Type
 
@@ -63,6 +78,9 @@ instance View TypeF Type where
   proj    = left . unFix
   inj  e  = Fix (e :*: K dummyPos)
 
+dummyPos :: Pos
+dummyPos = newPos "<unknown>" 1 1
+
 instance View TypeF Type' where
   proj = unFix
   inj  = Fix
@@ -71,6 +89,8 @@ pattern TVar v             <- (proj -> (TVarF v)) where
   TVar v = inj (TVarF v)
 pattern TInt               <- (proj -> TIntF) where
   TInt = inj TIntF
+pattern TDbl               <- (proj -> TDblF) where
+  TDbl = inj TDblF
 pattern TBool              <- (proj -> TBoolF) where
   TBool = inj TBoolF
 pattern TChar              <- (proj -> TCharF) where
@@ -93,7 +113,7 @@ class Types a where
   apply :: Subst -> a -> a
 
 instance Types Type where
-  ftv = cata alg . stripPos where
+  ftv = cata alg . stripAnn where
     alg :: TypeF (S.Set TyVar) -> (S.Set TyVar)
     alg (TVarF v) = S.singleton v
     alg e         = fold e
@@ -149,11 +169,11 @@ toList (TRowExtend l t r) =
     in ((l, t):ls, mv)
 toList t = error $ "Unexpected row type: " ++ show (ppType t)
 
-lacks :: Label -> Constraint
-lacks = S.singleton
+lacks :: [Label] -> Constraint
+lacks = Row . S.fromList
 
 mkRowType :: Type -> [(Label, Type)] -> Type
-mkRowType = foldr $ \(l, t@(getPos -> pos)) r ->
+mkRowType = foldr $ \(l, t@(getAnn -> pos)) r ->
     Fix (TRowExtendF l t r :*: K pos)
 
 rowToMap :: Type -> M.Map Name Type
@@ -164,11 +184,56 @@ rowToMap t                  = error $ "Unexpected row type: " ++ show (ppType t)
 
 
 ------------------------------------------------------------
+-- Constraints
+
+-- | True if the supplied type of kind Star satisfies the (Star) constraint
+satisfies :: Type -> Constraint -> Bool
+satisfies t c =
+    case (infer t, c) of
+        (Star c1, Star c2) -> c1 >= c2
+        (c1, c2)  -> error $ "satisfies: kind mismatch: " ++ show (c1, c2)
+  where
+    infer :: Type -> Constraint
+    infer (TVar v)  = tyvarConstraint v
+    infer TInt      = Star CNum
+    infer TDbl      = Star CNum
+    infer TBool     = Star COrd
+    infer TChar     = Star COrd
+    infer TFun{}    = Star None
+    infer (TList t) =
+        let Star c = infer t
+        in Star (min c COrd)
+    infer (TRecord r)
+        | Just (Star c) <- inferFromRow r = Star (min c COrd)
+        | otherwise = Star None
+    infer (TVariant r)
+        | Just (Star c) <- inferFromRow r = Star (min c COrd)
+        | otherwise = Star None
+    infer t = error $ "satisfies/infer: unexpected type: " ++ show t
+
+    inferFromRow :: Type -> Maybe Constraint
+    inferFromRow TVar{}    = Nothing
+    inferFromRow TRowEmpty = Nothing
+    inferFromRow (TRowExtend _ t r)
+        | Just c <- inferFromRow r = Just $ infer t `unionConstraints` c
+        | otherwise = Just $ infer t
+    inferFromRow t = error $ "satisfies/inferFromRow: unexpected type: " ++ show t
+
+unionConstraints :: Constraint -> Constraint -> Constraint
+unionConstraints (Row s1)  (Row s2) = Row $ s1 `S.union` s2
+unionConstraints (Star c1) (Star c2)
+    | c1 > c2   = Star c1 -- pick the most specific
+    | otherwise = Star c2
+unionConstraints c1 c2  = error $ "unionConstraints: kind mismatch: " ++ show (c1, c2)
+
+
+------------------------------------------------------------
 -- Pretty-printing
 
 ppType :: Type -> Doc
 ppType (TVar v)     = text $ tyvarName v <> show (tyvarUnique v)
 ppType TInt         = "Int"
+ppType TDbl         = "Double"
 ppType TBool        = "Bool"
 ppType TChar        = "Char"
 ppType (TFun t s)   = ppParenType t <+> "->" <+> ppType s
@@ -207,13 +272,15 @@ ppScheme (rename -> Scheme vars t)
                          <+> ppType t
   where
     ppConstraint :: TyVar -> [Doc]
-    ppConstraint v@(TyVar _ _ k c) =
-      case k of
-        Star            -> []
-        Row | null ls   -> []
+    ppConstraint v =
+      case tyvarConstraint v of
+        Row (S.toList -> ls)
+            | null ls   -> []
             | otherwise -> [catBy "\\" $ ppType (TVar v) : map text ls]
-      where
-        ls = S.toList c
+        Star None -> []
+        Star CEq  -> ["Eq"  <+> ppType (TVar v)]
+        Star COrd -> ["Ord" <+> ppType (TVar v)]
+        Star CNum -> ["Num" <+> ppType (TVar v)]
 
 -- | alpha rename of type vars
 rename :: Scheme -> Scheme
@@ -221,7 +288,7 @@ rename (Scheme vars t) = Scheme vars' t'
   where
     vars' = zipWith renameTyVar vars [1..]
 
-    renameTyVar (TyVar n _ k c) i = TyVar n i k c
+    renameTyVar (TyVar n _ c) i = TyVar n i c
 
     m = IM.fromList $ zip (map tyvarUnique vars) vars'
     t' = cata alg t where
@@ -229,3 +296,9 @@ rename (Scheme vars t) = Scheme vars' t'
       alg (TVarF v :*: pos) | Just v' <- IM.lookup (tyvarUnique v) m
             = Fix (TVarF v' :*: pos)
       alg t = Fix t
+
+ppStarConstraint :: StarHierarchy -> Doc
+ppStarConstraint None = mempty
+ppStarConstraint CEq  = "Eq"
+ppStarConstraint COrd = "Ord"
+ppStarConstraint CNum = "Num"

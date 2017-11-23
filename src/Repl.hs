@@ -63,7 +63,10 @@ main = do
       [ "Expresso REPL"
       , "Type :help or :h for a list of commands"
       ]
-    loadPrelude preludePath
+    HL.catch
+        (loadPrelude preludePath)
+        (\(e :: HL.SomeException) ->
+             spew $ "Warning: Couldn't open " ++ preludePath ++ ": " ++ show e)
     repl
 
 -- | The read-eval-print-loop

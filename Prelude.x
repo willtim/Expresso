@@ -15,10 +15,10 @@ let
     -- Dynamic binding
 
     withOverride = overrides: f: self: overrides (f self);
-    mkOverridable = f: { override = overrides: (withOverride overrides f) | fix f};
+    mkOverridable = f: { override_ = overrides: (withOverride overrides f) | fix f};
 
     -- our exported override function
-    override = r: overrides: mkOverridable (r.override overrides)
+    override = r: overrides: mkOverridable (r.override_ overrides)
 
 
 -- Exports

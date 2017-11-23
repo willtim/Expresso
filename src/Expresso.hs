@@ -1,5 +1,4 @@
 {-# LANGUAGE TupleSections #-}
-{-# OPTIONS_GHC -fno-warn-name-shadowing #-}
 
 ------------------------------------------------------------
 -- Expresso API
@@ -32,6 +31,7 @@ import Expresso.InferType (TIState, initTIState)
 import Expresso.Pretty (render)
 import Expresso.Syntax
 import Expresso.Type
+import Expresso.Utils
 import qualified Expresso.Eval as Eval
 import qualified Expresso.InferType as InferType
 import qualified Expresso.Parser as Parser
@@ -40,22 +40,25 @@ import qualified Expresso.Parser as Parser
 typeOfWithEnv :: TypeEnv -> TIState -> ExpI -> IO (Either String Scheme)
 typeOfWithEnv tEnv tState ei = runExceptT $ do
     e <- Parser.resolveImports ei
-    ExceptT $ return $ inferType tEnv tState e
+    ExceptT $ return $ inferTypes tEnv tState e
 
 typeOf :: ExpI -> IO (Either String Scheme)
 typeOf = typeOfWithEnv mempty initTIState
 
 typeOfString :: String -> IO (Either String Scheme)
 typeOfString str = runExceptT $ do
-    top <- ExceptT $ return $ Parser.parse "<unknown" str
+    top <- ExceptT $ return $ Parser.parse "<unknown>" str
     ExceptT $ typeOf top
 
-evalWithEnv :: HasValue a => (TypeEnv, TIState, Env) -> ExpI -> IO (Either String a)
+evalWithEnv
+    :: HasValue a
+    => (TypeEnv, TIState, Env)
+    -> ExpI
+    -> IO (Either String a)
 evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
-  e <- Parser.resolveImports ei
-  case inferType tEnv tState e of
-    Left err -> throwError err
-    Right _  -> ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e
+  e    <- Parser.resolveImports ei
+  _sch <- ExceptT . return $ inferTypes tEnv tState e
+  ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e
 
 eval :: HasValue a => ExpI -> IO (Either String a)
 eval = evalWithEnv (mempty, initTIState, mempty)
@@ -71,19 +74,25 @@ evalString str = runExceptT $ do
     ExceptT $ eval top
 
 -- used by the REPL to bind variables
-bind :: (TypeEnv, TIState, Env) -> Bind Name -> ExpI -> EvalM (TypeEnv, TIState, Env)
+bind
+    :: (TypeEnv, TIState, Env)
+    -> Bind Name
+    -> ExpI
+    -> EvalM (TypeEnv, TIState, Env)
 bind (tEnv, tState, env) b ei = do
     e     <- Parser.resolveImports ei
-    let (tEnv'e, tState') = InferType.runTI (InferType.tiDecl (getPos ei) b e) tEnv tState
-    case tEnv'e of
+    let (res'e, tState') =
+            InferType.runTI (InferType.tiDecl (getAnn ei) b e) tEnv tState
+    case res'e of
         Left err    -> throwError err
         Right tEnv' -> do
             thunk <- Eval.mkThunk $ Eval.eval env e
             env'  <- Eval.bind env b thunk
             return (tEnv', tState', env')
 
-inferType :: TypeEnv -> TIState -> Exp -> Either String Scheme
-inferType tEnv tState e = fst $ InferType.runTI (InferType.typeInference e) tEnv tState
+inferTypes :: TypeEnv -> TIState -> Exp -> Either String Scheme
+inferTypes tEnv tState e =
+    fst $ InferType.runTI (InferType.typeInference e) tEnv tState
 
 showType :: Scheme -> String
 showType = render . ppScheme

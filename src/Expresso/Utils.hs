@@ -3,6 +3,7 @@
 {-# LANGUAGE DeriveTraversable #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
 module Expresso.Utils(
@@ -15,14 +16,20 @@ module Expresso.Utils(
   para,
   ana,
   (&&&),
+  (***),
   first,
   second,
   showError,
-  View(..)
+  View(..),
+  annotate,
+  stripAnn,
+  getAnn,
+  withAnn
 )
 where
 
 import Control.Monad
+
 
 newtype Fix f = Fix { unFix :: f (Fix f) }
 
@@ -38,7 +45,6 @@ data (f :+: g) a = InL (f a) | InR (g a)
 cata :: Functor f => (f a -> a) -> Fix f -> a
 cata phi = phi . fmap (cata phi) . unFix
 
-
 cataM :: (Monad m, Traversable f) =>
          (f a -> m a) -> Fix f -> m a
 cataM algM = algM <=< (mapM (cataM algM) . unFix)
@@ -52,6 +58,10 @@ ana coalg = Fix . fmap (ana coalg) . coalg
 -- Equivalent to specialized version from Arrow
 (&&&) :: (a -> b) -> (a -> c) -> (a -> (b,c))
 f &&& g = \a -> (f a, g a)
+
+-- Equivalent to specialized version from Arrow
+(***) :: (a -> b) -> (c -> d) -> ((a, c) -> (b, d))
+f *** g = \(a, b) -> (f a, g b)
 
 -- Equivalent to specialized version from Arrow
 first :: (a -> b) -> (a,c) -> (b,c)
@@ -76,3 +86,23 @@ class View f a where
 
 showError :: Show a => Either a b -> Either String b
 showError = either (Left . show) Right
+
+-- | add annotation
+annotate :: forall f a. Functor f => a -> Fix f -> Fix (f :*: K a)
+annotate ann = cata alg where
+  alg :: f (Fix (f :*: K a)) -> Fix (f :*: K a)
+  alg e = Fix (e :*: K ann)
+
+-- | strip annotations
+stripAnn :: forall f a. Functor f => Fix (f :*: K a) -> Fix f
+stripAnn = cata alg where
+  alg :: (f :*: K a) (Fix f) -> Fix f
+  alg (e :*: _) = Fix e
+
+-- | retrieve annotation
+getAnn :: Fix (f :*: K a) -> a
+getAnn = unK . right . unFix
+
+-- | fix with annotation
+withAnn :: a -> f (Fix (f :*: K a) )-> Fix (f :*: K a)
+withAnn ann e = Fix (e :*: K ann)

@@ -13,8 +13,7 @@
 -- Type inference and checking.
 --
 -- The type system implemented here is a basic Hindley-Milner
--- Algorithm-W with supporting let-bound polymorphism; and polymorphic
--- extensible records and variants with constrained rows.
+-- Algorithm-W with polymorphic extensible (constrained) row types.
 --
 module Expresso.InferType (
       typeInference
@@ -58,7 +57,9 @@ removeFromEnv pos bind mty =
           s <- gets tiSubst
           case apply s <$> mty of
             Just (TRecord r) -> remove (M.keys $ rowToMap r) m
-            Just t  -> throwError $ show pos ++ " : record wildcard cannot be bound to type " ++ show (ppType t)
+            Just t  -> throwError $ show pos ++
+                           " : record wildcard cannot be bound to type " ++
+                           show (ppType t)
             Nothing -> throwError $ show pos ++ " : unexpected record wildcard"
   where
     remove xs = local $ \(TypeEnv env) ->
@@ -88,27 +89,27 @@ initTIState :: TIState
 initTIState = TIState { tiSupply = 0, tiSubst = mempty }
 
 newTyVar :: Pos -> Char -> TI Type
-newTyVar pos prefix = annPos pos <$> newTyVar' prefix
+newTyVar pos prefix = annotate pos <$> newTyVar' prefix
 
-newTyVarWith :: Pos -> Kind -> Constraint -> Char -> TI Type
-newTyVarWith pos k c prefix =
-    annPos pos <$> newTyVarWith' k c prefix
+newTyVarWith :: Pos -> Constraint -> Char -> TI Type
+newTyVarWith pos c prefix =
+    annotate pos <$> newTyVarWith' c prefix
 
 newTyVar' :: Char -> TI Type'
-newTyVar' = newTyVarWith' Star S.empty
+newTyVar' = newTyVarWith' (Star None)
 
-newTyVarWith' :: Kind -> Constraint -> Char -> TI Type'
-newTyVarWith' k c prefix = do
+newTyVarWith' :: Constraint -> Char -> TI Type'
+newTyVarWith' c prefix = do
   s <- get
   let i = tiSupply s
   put s {tiSupply = i + 1 }
-  return (TVar $ TyVar [prefix] i k c)
+  return (TVar $ TyVar [prefix] i c)
 
 -- | The instantiation function replaces all bound type variables in a
 -- type scheme with fresh type variables.
 instantiate :: Pos -> Scheme -> TI Type
 instantiate pos (Scheme vars t) = do
-  nvars <- mapM (\(TyVar (p:_) _ k c) -> newTyVarWith pos k c p) vars
+  nvars <- mapM (\(TyVar (p:_) _ c) -> newTyVarWith pos c p) vars
   let s = mconcat $ zipWith (|->) vars nvars
   return $ apply s t
 
@@ -116,17 +117,18 @@ unify :: Type -> Type -> TI ()
 unify t1 t2 = do
   s <- gets tiSubst
   u <- mgu (apply s t1) (apply s t2)
-  modify (\st -> st { tiSubst = u <> tiSubst st }) -- TODO lens?
+  modify (\st -> st { tiSubst = u <> tiSubst st })
 
 mgu :: Type -> Type -> TI Subst
 mgu (TFun l r) (TFun l' r') = do
   s1 <- mgu l l'
   s2 <- mgu (apply s1 r) (apply s1 r')
   return $ s2 <> s1
-mgu (TVar u) t@(TVar v) = unionConstraints (getPos t) u v
+mgu (TVar u) t@(TVar v) = unifyConstraints (getAnn t) u v
 mgu (TVar v) t = varBind v t
 mgu t (TVar v) = varBind v t
 mgu TInt TInt = return nullSubst
+mgu TDbl TDbl = return nullSubst
 mgu TBool TBool = return nullSubst
 mgu TChar TChar = return nullSubst
 mgu (TList u) (TList v) = mgu u v
@@ -137,39 +139,47 @@ mgu row1@(TRowExtend label1 fieldTy1 rowTail1) row2@TRowExtend{} = do
   (fieldTy2, rowTail2, theta1) <- rewriteRow row2 label1
   -- ^ apply side-condition to ensure termination
   case snd $ toList rowTail1 of
-    Just tv | isInSubst tv theta1 -> throwError $ show (getPos row1) ++ " : recursive row type"
+    Just tv | isInSubst tv theta1 ->
+                  throwError $ show (getAnn row1) ++ " : recursive row type"
     _ -> do
       theta2 <- mgu (apply theta1 fieldTy1) (apply theta1 fieldTy2)
       let s = theta2 <> theta1
       theta3 <- mgu (apply s rowTail1) (apply s rowTail2)
       return $ theta3 <> s
 mgu t1 t2 = throwError $
-    "Types do not unify\n" ++
-    show (getPos t1) ++" : "++ show (ppType t1) ++ " versus\n" ++
-    show (getPos t2) ++" : "++ show (ppType t2)
+    "Types do not unify:\n" ++
+    show (getAnn t1) ++" : "++ show (ppType t1) ++ "\n" ++
+    show (getAnn t2) ++" : "++ show (ppType t2)
 
--- | in order to unify two type variables, we must union any lacks constraints
-unionConstraints :: Pos -> TyVar -> TyVar -> TI Subst
-unionConstraints pos u v
+-- | in order to unify two type variables, we must unify any constraints
+unifyConstraints :: Pos -> TyVar -> TyVar -> TI Subst
+unifyConstraints pos u v
   | u == v    = return nullSubst
   | otherwise =
-      case (tyvarKind u, tyvarKind v) of
-       (Star, Star) -> return $ u |-> annPos pos (TVar v)
-       (Row,  Row)  -> do
-         let c = (tyvarConstraint u) `S.union` (tyvarConstraint v)
-         r <- newTyVarWith pos Row c 'r'
-         return $ mconcat [ u |-> r
-                          , v |-> r
-                          ]
-       _            -> throwError $ show pos ++ " : kind mismatch!"
+      case (tyvarConstraint u, tyvarConstraint v) of
+       (Star None, Star None) ->
+           return $ u |-> annotate pos (TVar v)
+       (c1, c2) -> do
+           let c = head $ tyvarName v
+           w <- newTyVarWith pos (c1 `unionConstraints` c2) c
+           return $ mconcat
+               [ u |-> w
+               , v |-> w
+               ]
 
 varBind :: TyVar -> Type -> TI Subst
 varBind u t
-  | u `S.member` ftv t = throwError $ show (getPos t) ++ " : occur check fails: " ++ tyvarName u ++
-                                  " occurs in " ++ show (ppType t)
-  | otherwise          = case tyvarKind u of
-                           Star -> return $ u |-> t
-                           Row  -> varBindRow (getPos t) u t
+  | u `S.member` ftv t = throwError $ show (getAnn t) ++
+        " : occur check fails: " ++ tyvarName u ++
+        " occurs in " ++ show (ppType t)
+  | otherwise          =
+        case tyvarConstraint u of
+            Star c | t `satisfies` tyvarConstraint u -> return $ u |-> t
+                   | otherwise ->
+                         throwError $ show (getAnn t) ++ " : cannot unify " ++
+                                      show (ppType t) ++ " with constraint " ++
+                                      show (ppStarConstraint c)
+            Row{} -> varBindRow (getAnn t) u t
 
 -- | bind the row tyvar to the row type, as long as the row type does not
 -- contain the labels in the tyvar lacks constraint; and propagate these
@@ -179,27 +189,32 @@ varBindRow pos u t
   = case S.toList (ls `S.intersection` ls') of
       [] | Nothing <- mv -> return s1
          | Just r1 <- mv -> do
-             let c = ls `S.union` (tyvarConstraint r1)
-             r2 <- newTyVarWith pos Row c 'r'
+             let c = ls `S.union` (labelsFrom r1)
+             r2 <- newTyVarWith pos (Row c) 'r'
              let s2 = r1 |-> r2
              return $ s1 <> s2
-      labels             -> throwError $ show pos ++ " : repeated label(s): " ++ intercalate ", " labels
+      labels             -> throwError $ show pos ++ " : repeated label(s): " ++
+                                         intercalate ", " labels
   where
-    ls        = tyvarConstraint u
-    (ls', mv) = first (S.fromList . map fst) $ toList t
-    s1        = u |-> t
+    ls           = labelsFrom u
+    (ls', mv)    = first (S.fromList . map fst) $ toList t
+    s1           = u |-> t
+    labelsFrom v = case tyvarConstraint v of
+        Row s -> s
+        _     -> S.empty
 
 rewriteRow :: Type -> Label -> TI (Type, Type, Subst)
 rewriteRow (Fix (TRowEmptyF :*: K pos)) newLabel =
   throwError $ show pos ++ " : label " ++ show newLabel ++ " cannot be inserted"
 rewriteRow (Fix (TRowExtendF label fieldTy rowTail :*: K pos)) newLabel
-  | newLabel == label     = return (fieldTy, rowTail, nullSubst) -- ^ nothing to do
+  | newLabel == label     =
+      return (fieldTy, rowTail, nullSubst) -- ^ nothing to do
   | TVar alpha <- rowTail = do
-      beta  <- newTyVarWith pos Row (lacks newLabel) 'r'
+      beta  <- newTyVarWith pos (lacks [newLabel]) 'r'
       gamma <- newTyVar pos 'a'
       s     <- varBindRow pos alpha
-                    $ withPos pos $ TRowExtendF newLabel gamma beta
-      return (gamma, apply s $ withPos pos $ TRowExtendF label fieldTy beta, s)
+                    $ withAnn pos $ TRowExtendF newLabel gamma beta
+      return (gamma, apply s $ withAnn pos $ TRowExtendF label fieldTy beta, s)
   | otherwise   = do
       (fieldTy', rowTail', s) <- rewriteRow rowTail newLabel
       return (fieldTy', TRowExtend label fieldTy rowTail', s)
@@ -220,12 +235,12 @@ ti = cata alg
         removeFromEnv pos b Nothing $
           extendEnv schemes $ do
             t1 <- e
-            return $ withPos pos $ TFunF tv t1
+            return $ withAnn pos $ TFunF tv t1
     alg (EApp e1 e2 :*: K pos) = do
         t1 <- e1
         t2 <- e2
         tv <- newTyVar pos 'a'
-        unify t1 (TFun t2 tv)
+        unify t1 (withAnn pos $ TFunF t2 tv)
         return tv
     alg (ELet b e1 e2 :*: K pos) = do
         t1 <- e1
@@ -237,14 +252,17 @@ tiBinds :: Pos -> Bind Name -> Type -> TI (M.Map Name Type)
 tiBinds _   (Arg x)       ty = return $ M.singleton x ty
 tiBinds pos (RecArg xs)   ty = do
     tvs <- mapM (const $ newTyVar pos 'l') xs
-    r   <- newTyVar pos 'r' -- implicit tail
+    r   <- newTyVarWith pos (lacks xs) 'r' -- implicit tail
     unify ty (TRecord $ mkRowType r $ zip xs tvs)
     return $ M.fromList $ zip xs tvs
 tiBinds pos RecWildcard ty = do
     s <- gets tiSubst
     case apply s ty of
         TRecord r -> return $ rowToMap r
-        _         -> throwError $ show pos ++ " : record wildcard cannot bind to type: " ++ show ty
+        _         ->
+            throwError $ show pos ++
+                " : record wildcard cannot bind to type: " ++
+                show ty
 
 -- used by the Repl
 tiDecl :: Pos -> Bind Name -> Exp -> TI TypeEnv
@@ -255,22 +273,41 @@ tiDecl pos b e = do
        extendEnv schemes ask
 
 tiPrim :: Pos -> Prim -> TI Type
-tiPrim pos prim = fmap (annPos pos) $ case prim of
+tiPrim pos prim = fmap (annotate pos) $ case prim of
   Int{}                  -> return $ TInt
+  Dbl{}                  -> return $ TDbl
   Bool{}                 -> return $ TBool
   Char{}                 -> return $ TChar
   String{}               -> return $ TList TChar
+  Show                   -> do
+    a <- newTyVar' 'a'
+    return $ TFun a (TList TChar)
   Trace                  -> do
     a <- newTyVar' 'a'
     return $ TFun (TFun (TList TChar) a) a
   ErrorPrim              -> do
     a <- newTyVar' 'a'
     return $ TFun (TList TChar) a
-  Neg                    -> return $ unOp TInt
-  Add                    -> return $ binOp TInt
-  Sub                    -> return $ binOp TInt
-  Mul                    -> return $ binOp TInt
-  Div                    -> return $ binOp TInt
+
+  ArithPrim{}            ->
+    binOp <$> newTyVarWith' (Star CNum) 'a'
+  RelPrim{}              ->
+    binOp <$> newTyVarWith' (Star COrd) 'a'
+
+  Not                    -> return $ TFun TBool TBool
+
+  Eq                     ->
+      binOp <$> newTyVarWith' (Star CEq) 'a'
+
+  Double                 -> return $ TFun TInt TDbl
+  Floor                  -> return $ TFun TDbl TInt
+  Ceiling                -> return $ TFun TDbl TInt
+  Abs                    ->
+      unOp  <$> newTyVarWith' (Star CNum) 'a'
+  Neg                    ->
+      unOp  <$> newTyVarWith' (Star CNum) 'a'
+  Mod                    ->
+      return $ TFun TInt (TFun TInt TInt)
   FixPrim                -> do
     a <- newTyVar' 'a'
     return $ TFun (TFun a a) a
@@ -297,7 +334,7 @@ tiPrim pos prim = fmap (annPos pos) $ case prim of
     a <- newTyVar' 'a'
     b <- newTyVar' 'b'
     return $ TFun (TFun a (TFun b b)) (TFun b (TFun (TList a) b))
-  ListNull               -> do -- TODO not needed if lists have equality
+  ListNull               -> do
     a <- newTyVar' 'a'
     return $ TFun (TList a) TBool
   ListAppend             -> do
@@ -306,35 +343,36 @@ tiPrim pos prim = fmap (annPos pos) $ case prim of
   RecordEmpty            -> return $ TRecord TRowEmpty
   (RecordSelect label)   -> do
     a <- newTyVar' 'a'
-    r <- newTyVarWith' Row (lacks label) 'r'
+    r <- newTyVarWith' (lacks [label]) 'r'
     return $ TFun (TRecord $ TRowExtend label a r) a
   (RecordExtend label)   -> do
     a <- newTyVar' 'a'
-    r <- newTyVarWith' Row (lacks label) 'r'
+    r <- newTyVarWith' (lacks [label]) 'r'
     return $ TFun a (TFun (TRecord r) (TRecord $ TRowExtend label a r))
   (RecordRestrict label) -> do
     a <- newTyVar' 'a'
-    r <- newTyVarWith' Row (lacks label) 'r'
+    r <- newTyVarWith' (lacks [label]) 'r'
     return $ TFun (TRecord $ TRowExtend label a r) (TRecord r)
   EmptyAlt               -> do
       b <- newTyVar' 'b'
       return $ TFun (TVariant TRowEmpty) b
   (VariantInject label)  -> do -- ^ dual of record select
     a <- newTyVar' 'a'
-    r <- newTyVarWith' Row (lacks label) 'r'
+    r <- newTyVarWith' (lacks [label]) 'r'
     return $ TFun a (TVariant $ TRowExtend label a r)
            -- a -> <l:a|r>
   (VariantEmbed label)   -> do -- ^ dual of record restrict
     a <- newTyVar' 'a'
-    r <- newTyVarWith' Row (lacks label) 'r'
+    r <- newTyVarWith' (lacks [label]) 'r'
     return $ TFun (TVariant r) (TVariant $ TRowExtend label a r)
            -- <r> -> <l:a|r>
   (VariantElim label)    -> do
     a <- newTyVar' 'a'
     b <- newTyVar' 'b'
-    r <- newTyVarWith' Row (lacks label) 'r'
+    r <- newTyVarWith' (lacks [label]) 'r'
     return $ TFun (TFun a b)
-                  (TFun (TFun (TVariant r) b) (TFun (TVariant $ TRowExtend label a r) b))
+                  (TFun (TFun (TVariant r) b)
+                        (TFun (TVariant $ TRowExtend label a r) b))
                   --  (a -> b) -> (<r> -> b) -> <l:a|r> -> b
 
   where
