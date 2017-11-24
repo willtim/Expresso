@@ -16,6 +16,7 @@ unitTests = testGroup
   , recordTests
   , variantTests
   , listTests
+  , primTests
   ]
 
 letTests = testGroup
@@ -95,6 +96,12 @@ listTests = testGroup
   [ hasValue "[1,2,3]" [1::Integer,2,3]
   , illTyped "[1,True]"
   -- "x: y: [x, y]"
+  ]
+
+primTests = testGroup
+  "Primitive expressions"
+  [ hasValue "(1 == 2)" False
+  , illTyped "1 == 2 == 3"
   ]
 
 hasValue :: (Eq a, Show a, HasValue a) => String -> a -> TestTree
