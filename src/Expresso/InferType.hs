@@ -291,9 +291,9 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
     return $ TFun (TList TChar) a
 
   ArithPrim{}            ->
-    binOp <$> newTyVarWith' (Star CNum) 'a'
+    binOp  <$> newTyVarWith' (Star CNum) 'a'
   RelPrim{}              ->
-    binOp <$> newTyVarWith' (Star COrd) 'a'
+    binOpB <$> newTyVarWith' (Star COrd) 'a'
 
   Not                    -> return $ TFun TBool TBool
 
