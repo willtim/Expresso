@@ -6,6 +6,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
 
 ------------------------------------------------------------
 --
@@ -32,10 +33,15 @@ import Control.Monad.Except
 import Data.Foldable (foldrM)
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
+import Data.Coerce
 import Data.Maybe
 import Data.Monoid
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.List as List
+import Control.Monad.ST
+import Data.STRef
+import Data.Void
+import Data.Functor.Identity
 
 import Expresso.Syntax
 import Expresso.Type
@@ -46,7 +52,11 @@ import Expresso.Utils (cata, (:*:)(..), K(..))
 -- A HashMap makes it easy to support record wildcards
 type Env = HashMap Name Thunk
 
-type EvalM a = ExceptT String IO a
+newtype EvalM a = EvalM { runEvalT :: ExceptT String Identity a }
+instance Functor EvalM
+instance Applicative EvalM
+instance Monad EvalM
+instance MonadError String EvalM
 
 newtype Thunk = Thunk { force :: EvalM Value }
 
@@ -54,16 +64,17 @@ instance Show Thunk where
     show _ = "<Thunk>"
 
 mkThunk :: EvalM Value -> EvalM Thunk
-mkThunk ev = do
-  ref <- liftIO $ newIORef Nothing
-  return $ Thunk $ do
-      mv <- liftIO $ readIORef ref
-      case mv of
-          Nothing -> do
-              v <- ev
-              liftIO $ writeIORef ref (Just v)
-              return v
-          Just v  -> return v
+mkThunk = return . Thunk
+-- mkThunk (EvalM ev) = EvalM $ do
+--   ref <- lift $ newSTRef Nothing
+--   return $ Thunk $ EvalM $ do
+--       mv <- lift $ readSTRef ref
+--       case mv of
+--           Nothing -> do
+--               v <- ev
+--               lift $ writeSTRef ref (Just v)
+--               return v
+--           Just v  -> return v
 
 data Value
   = VLam     !(Thunk -> EvalM Value)
@@ -108,7 +119,11 @@ extractChar (VChar c) = Just c
 extractChar _ = Nothing
 
 runEvalM :: EvalM a -> IO (Either String a)
-runEvalM = runExceptT
+runEvalM = undefined
+
+runEvalM' :: EvalM a -> Either String a
+runEvalM' = runIdentity . runExceptT . runEvalT
+
 
 eval :: Env -> Exp -> EvalM Value
 eval env e = cata alg e env
@@ -388,12 +403,12 @@ instance Inject Char where
 
 -- TODO write pure evaluator in ST, carry type in class to get rid of Either/Maybe to get
 --    instance (Inject a, HasValue b) => HasValue (a -> b) where
-instance (Inject a, HasValue b) => HasValue (a -> EvalM b) where
-    proj (VLam f) = pure $ \x -> do
+instance (Inject a, HasValue b) => HasValue (a -> Either String b) where
+    proj (VLam f) = pure $ \x -> runEvalM' $ do
       x <- (mkThunk $ pure $ inj x)
       r <- f x
       proj r
-    proj v        = failProj "VLam" v
+    -- proj v        = failProj "VLam" v
 
 
 class HasValue a where
