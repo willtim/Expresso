@@ -210,10 +210,10 @@ satisfies t c =
         let Star c = infer t
         in Star (min c COrd)
     infer (TRecord r)
-        | Just (Star c) <- inferFromRow r = Star (min c COrd)
+        | Just (Star c) <- inferFromRow r = Star (min c CEq)
         | otherwise = Star None
     infer (TVariant r)
-        | Just (Star c) <- inferFromRow r = Star (min c COrd)
+        | Just (Star c) <- inferFromRow r = Star (min c CEq)
         | otherwise = Star None
     infer t = error $ "satisfies/infer: unexpected type: " ++ show t
 
