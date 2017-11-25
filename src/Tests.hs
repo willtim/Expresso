@@ -101,6 +101,7 @@ listTests = testGroup
 relationalTests = testGroup
   "Relational expressions"
   [ hasValue "(1 == 2)" False
+  , hasValue "1/=2" True
   , illTyped "1 == 2 == 3"
   , hasValue "{x = 1, y = True} == {y = True, x = 1}" True -- field order should not matter
   , illTyped "{x = 1, y = True} > {y = True, x = 1}" -- cannot compare records for ordering

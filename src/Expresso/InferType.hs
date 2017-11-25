@@ -298,6 +298,7 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
   Not                    -> return $ TFun TBool TBool
 
   Eq                     -> binOpB <$> newTyVarWith' (Star CEq) 'a'
+  NEq                    -> binOpB <$> newTyVarWith' (Star CEq) 'a'
 
   Double                 -> return $ TFun TInt TDbl
   Floor                  -> return $ TFun TDbl TInt
