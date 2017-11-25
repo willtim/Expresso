@@ -16,7 +16,7 @@ unitTests = testGroup
   , recordTests
   , variantTests
   , listTests
-  , primTests
+  , relationalTests
   ]
 
 letTests = testGroup
@@ -98,10 +98,17 @@ listTests = testGroup
   -- "x: y: [x, y]"
   ]
 
-primTests = testGroup
-  "Primitive expressions"
+relationalTests = testGroup
+  "Relational expressions"
   [ hasValue "(1 == 2)" False
   , illTyped "1 == 2 == 3"
+  , hasValue "{x = 1, y = True} == {y = True, x = 1}" True -- field order should not matter
+  , illTyped "{x = 1, y = True} > {y = True, x = 1}" -- cannot compare records for ordering
+  , illTyped "Foo 1 > Bar{}" -- cannot compare variants for ordering
+  , hasValue "[1,2,3] == [1,2,3]" True -- lists can be compared for equality
+  , hasValue "[1,2,3] >= [1,2,2]" True -- lists can be compared for ordering
+  , hasValue "Just 1 == Just 1" True -- maybe can be compared for equality
+  , hasValue "Just 2 >= Just 1" True -- maybe can be compared for ordering
   ]
 
 hasValue :: (Eq a, Show a, HasValue a) => String -> a -> TestTree
