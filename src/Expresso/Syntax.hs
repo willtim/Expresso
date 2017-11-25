@@ -46,6 +46,8 @@ data Prim
   | ArithPrim ArithOp
   | RelPrim   RelOp
   | Not
+  | And
+  | Or
   | Eq
   | NEq
   | Double      -- double from int

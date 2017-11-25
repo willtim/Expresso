@@ -96,8 +96,8 @@ pTerm    = mkRecordRestrict
 
 opTable  = [ [ prefix "-" Neg
              ]
-           , [ binary ">>" FwdComp P.AssocRight
-             , binary "<<" BwdComp P.AssocRight
+           , [ binary ">>" FwdComp        P.AssocRight
+             , binary "<<" BwdComp        P.AssocRight
              ]
            , [ binary "*" (ArithPrim Mul) P.AssocLeft
              , binary "/" (ArithPrim Div) P.AssocLeft
@@ -105,8 +105,8 @@ opTable  = [ [ prefix "-" Neg
            , [ binary "+" (ArithPrim Add) P.AssocLeft
              , binary "-" (ArithPrim Sub) P.AssocLeft
              ]
-           , [ binary "++" ListAppend P.AssocLeft
-             , binary "::" ListCons   P.AssocRight
+           , [ binary "++" ListAppend     P.AssocLeft
+             , binary "::" ListCons       P.AssocRight
              ]
            , [ binary "==" Eq             P.AssocLeft
              , binary "/=" NEq            P.AssocLeft
@@ -114,6 +114,10 @@ opTable  = [ [ prefix "-" Neg
              , binary ">=" (RelPrim RGTE) P.AssocLeft
              , binary "<"  (RelPrim RLT)  P.AssocLeft
              , binary "<=" (RelPrim RLTE) P.AssocLeft
+             ]
+           , [ binary "&&" And            P.AssocRight
+             ]
+           , [ binary "||" Or             P.AssocRight
              ]
            ]
 
@@ -334,6 +338,7 @@ languageDef = emptyDef
                          , "++", "::", "|", ",", ".", "\\"
                          , "{|", "|}", ":=", "{..}"
                          , "==", "/=", ">", ">=", "<", "<="
+                         , "&&", "||"
                          ]
     , P.reservedNames  = [ "let", "in", "if", "then", "else", "case", "of"
                          , "True", "False", "Just", "Nothing"

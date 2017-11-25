@@ -177,6 +177,11 @@ evalPrim pos p = case p of
         (VBool . not) <$> equalValues pos v1 v2
 
     Not           -> VLam $ \v -> VBool <$> proj' v
+    And           -> VLam $ \v1 -> return $ VLam $ \v2 ->
+        VBool <$> ((&&) <$> proj' v1 <*> proj' v2)
+
+    Or            -> VLam $ \v1 -> return $ VLam $ \v2 ->
+        VBool <$> ((||) <$> proj' v1 <*> proj' v2)
 
     Double        -> mkStrictLam $ \v ->
         case v of

@@ -296,6 +296,8 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
     binOpB <$> newTyVarWith' (Star COrd) 'a'
 
   Not                    -> return $ TFun TBool TBool
+  And                    -> return $ TFun TBool (TFun TBool TBool)
+  Or                     -> return $ TFun TBool (TFun TBool TBool)
 
   Eq                     -> binOpB <$> newTyVarWith' (Star CEq) 'a'
   NEq                    -> binOpB <$> newTyVarWith' (Star CEq) 'a'
