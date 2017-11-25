@@ -201,7 +201,7 @@ pVariantEmbed = mkVariantEmbed
       pEmbedEntry = (,) <$> getPosition <*> pVariantLabel
 
 pCase = mkCase <$> getPosition
-               <*> (reserved "case" *> pTerm)
+               <*> (reserved "case" *> pApp <* reserved "of")
                <*> (braces pCaseBody)
                <?> "case expression"
 
@@ -332,7 +332,7 @@ languageDef = emptyDef
                          , "++", "::", "|", ",", ".", "\\"
                          , "{|", "|}", ":=", "{..}"
                          ]
-    , P.reservedNames  = [ "let", "in", "if", "then", "else", "case"
+    , P.reservedNames  = [ "let", "in", "if", "then", "else", "case", "of"
                          , "True", "False", "Just", "Nothing"
                          ]
     , P.caseSensitive  = True
