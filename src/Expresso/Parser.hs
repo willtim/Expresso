@@ -190,7 +190,7 @@ pRecordEntry =
     try (Update <$> identifier <*> (reservedOp ":=" *> pExp)) <|>
     mkFieldPun <$> getPosition <*> identifier
 
-pVariant = mkVariant <$> getPosition <*> pVariantLabel <*> pTerm
+pVariant = mkVariant <$> getPosition <*> pVariantLabel
 
 pVariantEmbed = mkVariantEmbed
              <$> getPosition
@@ -220,8 +220,8 @@ pCaseAlt =
 
 pVariantLabel = (:) <$> upper <*> identifier
 
-pMaybe =  (\pos e -> mkApp pos (mkPrim pos JustPrim) [e]) <$> getPosition <*> (reserved "Just" *> pTerm)
-      <|> (\pos   -> mkPrim pos NothingPrim) <$> getPosition <* reserved "Nothing"
+pMaybe =  (\pos -> mkPrim pos JustPrim)    <$> getPosition <* reserved "Just"
+      <|> (\pos -> mkPrim pos NothingPrim) <$> getPosition <* reserved "Nothing"
 
 pList = brackets pListBody
   where
@@ -254,8 +254,8 @@ mkCaseAlt pos (Update l altLamE) contE =
   where
     mkEmbed e = mkApp pos (mkPrim pos $ VariantEmbed l) [e]
 
-mkVariant :: Pos -> Label -> ExpI -> ExpI
-mkVariant pos l e = mkApp pos (mkPrim pos $ VariantInject l) [e]
+mkVariant :: Pos -> Label -> ExpI
+mkVariant pos l = mkPrim pos $ VariantInject l
 
 mkVariantEmbed :: Pos -> [(Pos , Label)] -> ExpI
 mkVariantEmbed pos ls =
