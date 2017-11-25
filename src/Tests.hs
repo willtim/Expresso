@@ -110,6 +110,8 @@ relationalTests = testGroup
   , hasValue "[1,2,3] >= [1,2,2]" True -- lists can be compared for ordering
   , hasValue "Just 1 == Just 1" True -- maybe can be compared for equality
   , hasValue "Just 2 >= Just 1" True -- maybe can be compared for ordering
+  , hasValue "True&&True"   True
+  , hasValue "True||False"  True
   ]
 
 hasValue :: (Eq a, Show a, HasValue a) => String -> a -> TestTree
