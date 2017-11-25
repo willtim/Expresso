@@ -109,6 +109,7 @@ opTable  = [ [ prefix "-" Neg
              , binary "::" ListCons   P.AssocRight
              ]
            , [ binary "==" Eq             P.AssocLeft
+             , binary "/=" NEq            P.AssocLeft
              , binary ">"  (RelPrim RGT)  P.AssocLeft
              , binary ">=" (RelPrim RGTE) P.AssocLeft
              , binary "<"  (RelPrim RLT)  P.AssocLeft
@@ -119,6 +120,7 @@ opTable  = [ [ prefix "-" Neg
 pPrimFun = msum
   [ fun "error"   ErrorPrim
   , fun "show"    Show
+  , fun "not"     Not
   , fun "maybe"   MaybePrim
   , fun "foldr"   ListFoldr
   , fun "null"    ListNull
@@ -331,6 +333,7 @@ languageDef = emptyDef
     , P.reservedOpNames= [ "=", ":", "-", "*", "/", "+"
                          , "++", "::", "|", ",", ".", "\\"
                          , "{|", "|}", ":=", "{..}"
+                         , "==", "/=", ">", ">=", "<", "<="
                          ]
     , P.reservedNames  = [ "let", "in", "if", "then", "else", "case", "of"
                          , "True", "False", "Just", "Nothing"

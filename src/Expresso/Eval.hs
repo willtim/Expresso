@@ -32,7 +32,6 @@ import Control.Monad.Except
 import Data.Foldable (foldrM)
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
-import Data.Maybe
 import Data.Monoid
 import Data.Ord
 import qualified Data.HashMap.Strict as HashMap
@@ -173,6 +172,9 @@ evalPrim pos p = case p of
 
     Eq            -> mkStrictLam2 $ \v1 v2 ->
         VBool <$> equalValues pos v1 v2
+
+    NEq           -> mkStrictLam2 $ \v1 v2 ->
+        (VBool . not) <$> equalValues pos v1 v2
 
     Not           -> VLam $ \v -> VBool <$> proj' v
 
@@ -428,7 +430,7 @@ instance {-# OVERLAPS #-} HasValue (HashMap Name Thunk) where
     proj v           = failProj "VRecord" v
 
 instance {-# OVERLAPS #-} HasValue [(Name, Thunk)] where
-    proj v             = HashMap.toList <$> proj v
+    proj v           = HashMap.toList <$> proj v
 
 failProj :: String -> Value -> EvalM a
 failProj desc v = throwError $ "Expected a " ++ desc ++

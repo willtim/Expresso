@@ -47,6 +47,7 @@ data Prim
   | RelPrim   RelOp
   | Not
   | Eq
+  | NEq
   | Double      -- double from int
   | Floor
   | Ceiling
