@@ -114,7 +114,7 @@ relationalTests = testGroup
   , hasValue "True||False"  True
   ]
 
-hasValue :: (Eq a, Show a, FromExpresso a) => String -> a -> TestTree
+hasValue :: (Eq a, Show a, FromValue a) => String -> a -> TestTree
 hasValue str expected = testCase str $ do
     result <- evalString str
     case result of
@@ -130,8 +130,8 @@ illTyped str = testCase str $ do
 
 assertTrue = return ()
 
-(-->) :: FromExpresso a => Name -> a -> (Name, a)
+(-->) :: FromValue a => Name -> a -> (Name, a)
 (-->) l v = (l, v)
 
-toMap :: (Eq a, Show a, FromExpresso a) => [(Name, a)] -> HashMap Name a
+toMap :: (Eq a, Show a, FromValue a) => [(Name, a)] -> HashMap Name a
 toMap = HashMap.fromList

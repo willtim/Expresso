@@ -148,7 +148,7 @@ doCommand c = case c of
     , ""
     ]
 
-instance FromExpresso Value -- FIXME
+instance FromValue Value -- FIXME
 
 doEval :: (Value -> IO String) -> ExpI -> Repl ()
 doEval pp e = do

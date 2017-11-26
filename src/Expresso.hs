@@ -26,7 +26,7 @@ module Expresso
 import Control.Monad ((>=>))
 import Control.Monad.Except (ExceptT(..), runExceptT, throwError)
 
-import Expresso.Eval (Env, EvalM, FromExpresso(..), Value(..), runEvalM)
+import Expresso.Eval (Env, EvalM, FromValue(..), Value(..), runEvalM)
 import Expresso.InferType (TIState, initTIState)
 import Expresso.Pretty (render)
 import Expresso.Syntax
@@ -51,7 +51,7 @@ typeOfString str = runExceptT $ do
     ExceptT $ typeOf top
 
 evalWithEnv
-    :: FromExpresso a
+    :: FromValue a
     => (TypeEnv, TIState, Env)
     -> ExpI
     -> IO (Either String a)
@@ -60,15 +60,15 @@ evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
   _sch <- ExceptT . return $ inferTypes tEnv tState e
   ExceptT $ runEvalM . (Eval.eval env >=> Eval.fromValue) $ e
 
-eval :: FromExpresso a => ExpI -> IO (Either String a)
+eval :: FromValue a => ExpI -> IO (Either String a)
 eval = evalWithEnv (mempty, initTIState, mempty)
 
-evalFile :: FromExpresso a => FilePath -> IO (Either String a)
+evalFile :: FromValue a => FilePath -> IO (Either String a)
 evalFile path = runExceptT $ do
     top <- ExceptT $ Parser.parse path <$> readFile path
     ExceptT $ eval top
 
-evalString :: FromExpresso a => String -> IO (Either String a)
+evalString :: FromValue a => String -> IO (Either String a)
 evalString str = runExceptT $ do
     top <- ExceptT $ return $ Parser.parse "<unknown>" str
     ExceptT $ eval top

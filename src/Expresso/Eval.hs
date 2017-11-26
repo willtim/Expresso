@@ -1,3 +1,5 @@
+{-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -5,9 +7,12 @@
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE StandaloneDeriving #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# LANGUAGE PolyKinds #-}
+{-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 
 ------------------------------------------------------------
@@ -21,7 +26,7 @@ module Expresso.Eval(
   , runEvalM
   , Env
   , EvalM
-  , FromExpresso(..)
+  , FromValue(..)
   , Value(..)
   , ppValue
   , ppValue'
@@ -46,6 +51,7 @@ import Data.STRef
 import Data.Void
 import Data.Functor.Identity
 import Data.Proxy
+import qualified GHC.Generics as G
 
 import Expresso.Syntax
 import Expresso.Type
@@ -62,7 +68,12 @@ deriving instance Applicative EvalM
 deriving instance Monad EvalM
 deriving instance MonadError String EvalM
 
-newtype Thunk = Thunk { force :: EvalM Value }
+newtype Thunk = Thunk { force_ :: EvalM Value }
+
+class MonadError String f => MonadEval f where
+  force :: Thunk -> f Value
+instance MonadEval EvalM where
+  force = force_
 
 instance Show Thunk where
     show _ = "<Thunk>"
@@ -315,7 +326,7 @@ mkStrictLam f = VLam $ \x -> force x >>= f
 mkStrictLam2 :: (Value -> Value -> EvalM Value) -> Value
 mkStrictLam2 f = mkStrictLam $ \v -> return $ mkStrictLam $ f v
 
-fromValue' :: FromExpresso a => Thunk -> EvalM a
+fromValue' :: (MonadEval f, FromValue a) => Thunk -> f a
 fromValue' = force >=> fromValue
 
 numOp :: Pos -> (forall a. Num a => a -> a -> a) -> Value -> Value -> EvalM Value
@@ -380,14 +391,74 @@ recordValues :: HashMap Label a -> [(Label, a)]
 recordValues = List.sortBy (comparing fst) . HashMap.toList
 
 ------------------------------------------------------------
--- FromExpresso class and instances
+-- FromValue class and instances
 
+-- | How to marshall Haskell contructors and selectors into Expresso types.
+-- TODO we just do something default for now
+data Options = Options
+defaultOptions :: Options
+defaultOptions = Options
+
+-- | Haskell types with a corresponding Expresso type.
+-- TODO generalize proxy?
 class HasType a where
-    typeOf :: proxy a -> Type
-class ToExpresso a where
+    typeOf :: Proxy a -> Type
+    default typeOf :: (G.Generic a, GHasType (G.Rep a)) => Proxy a -> Type
+    typeOf = snd . gtypeOf defaultOptions . fmap G.from
+setTag :: b -> (Maybe b, a) -> (Maybe b, a)
+setTag b (_, a) = (Just b, a)
+class GHasType f where
+    gtypeOf :: Options -> Proxy (f x) -> (Maybe String, Type)
+instance (GHasType f, G.Constructor c) => GHasType (G.M1 G.C c f) where
+    gtypeOf opts = setTag (G.conName m) . gtypeOf opts . fmap G.unM1
+      where m = (undefined :: t c f a)
+instance GHasType f => GHasType (G.D1 meta f) where
+    gtypeOf opts = gtypeOf opts . fmap G.unM1
+instance (GHasType f, G.Selector c) => GHasType (G.S1 c f) where
+    gtypeOf opts = setTag (G.selName m) . gtypeOf opts . fmap G.unM1
+      where m = (undefined :: t c f a)
+instance GHasType (G.K1 eitherROrP c) where
+    gtypeOf opts _ = pure TChar -- FIXME
+-- FIXME flatten record/variant types, e.g. for (a :+: b :+: c), emit {_=a, _=b, _=c}
+instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where
+    gtypeOf opts proxy = pure $ TVariant (TRowExtend lLabel lType (TRowExtend rLabel rType TRowEmpty))
+      where
+        (Just lLabel, lType) = gtypeOf opts (leftP proxy)
+        (Just rLabel, rType) = gtypeOf opts (rightP proxy)
+instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
+    gtypeOf opts proxy = pure $ TRecord (TRowExtend lLabel lType (TRowExtend rLabel rType TRowEmpty))
+      where
+        (Just lLabel, lType) = gtypeOf opts (leftP proxy)
+        (Just rLabel, rType) = gtypeOf opts (rightP proxy)
+
+-- genericTypeOf :: G.Generic a => proxy a -> Type
+-- genericTypeOf = undefined
+
+leftP :: forall (q :: (k -> k) -> (k -> k) -> k -> k) f g a . Proxy ((f `q` g) a) -> Proxy (f a)
+leftP _ = Proxy
+
+rightP :: forall (q :: (k -> k) -> (k -> k) -> k -> k) f g a . Proxy ((f `q` g) a) -> Proxy (g a)
+rightP _ = Proxy
+
+
+-- | Haskell types whose values can be converted to Expresso values.
+class ToValue a where
     toValue :: a -> Value
-class FromExpresso a where
-    fromValue :: Value -> EvalM a
+    default toValue :: (G.Generic a, GToValue (G.Rep a)) => a -> Value
+    toValue = gtoValue defaultOptions . G.from
+class GToValue f where
+    gtoValue :: Options -> f x -> Value
+instance GToValue f => GToValue (G.D1 meta f) where
+instance GToValue f => GToValue (G.C1 meta f) where
+instance GToValue f => GToValue (G.S1 meta f) where
+instance GToValue (G.K1 eitherROrP meta) where
+instance (GToValue f, GToValue g) => GToValue (f G.:+: g) where
+instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
+
+
+-- | Haskell types whose values can be represented by Expresso values.
+class FromValue a where
+    fromValue :: MonadEval f => Value -> f a
 
 instance HasType Integer where
     typeOf _ = TInt
@@ -408,6 +479,16 @@ instance HasType Void where
 instance HasType () where
     typeOf p = TRecord TRowEmpty
 
+
+-- FIXME move
+-- TODO challenge: derive TypeOf/ToValue/FromValue for tree
+--
+-- <Leaf:Int | <Node:{left:Int,right:[Int]} | <>>>
+data Foo a = Leaf a | Node { left :: a, right :: [a] }
+  deriving G.Generic
+instance HasType a => HasType (Foo a)
+instance ToValue a => ToValue (Foo a)
+
 inside :: proxy (f a) -> Proxy a
 inside = const Proxy
 
@@ -419,18 +500,18 @@ codom = inside
 
 
 
-instance ToExpresso Integer where
+instance ToValue Integer where
     toValue = VInt
-instance ToExpresso Double where
+instance ToValue Double where
     toValue = VDbl
-instance ToExpresso Char where
+instance ToValue Char where
     toValue = VChar
 
 -- TODO generic derivation a la GG
 
 -- TODO write pure evaluator in ST, carry type in class to get rid of Either/Maybe to get
---    instance (ToExpresso a, FromExpresso b) => FromExpresso (a -> b) where
-instance (ToExpresso a, FromExpresso b) => FromExpresso (a -> Either String b) where
+--    instance (ToValue a, FromValue b) => FromValue (a -> b) where
+instance (ToValue a, FromValue b) => FromValue (a -> Either String b) where
     fromValue (VLam f) = pure $ \x -> runEvalM' $ do
       x <- (mkThunk $ pure $ toValue x)
       r <- f x
@@ -439,56 +520,56 @@ instance (ToExpresso a, FromExpresso b) => FromExpresso (a -> Either String b) w
 
 
 
--- instance FromExpresso Value where
+-- instance FromValue Value where
     -- fromValue v        = return v
 
-instance FromExpresso Integer where
+instance FromValue Integer where
     fromValue (VInt i) = return i
     fromValue v        = failfromValue "VInt" v
 
-instance FromExpresso Double where
+instance FromValue Double where
     fromValue (VDbl d) = return d
     fromValue v        = failfromValue "VDbl" v
 
-instance FromExpresso Bool where
+instance FromValue Bool where
     fromValue (VBool b) = return b
     fromValue v         = failfromValue "VBool" v
 
-instance FromExpresso Char where
+instance FromValue Char where
     fromValue (VChar c) = return c
     fromValue v         = failfromValue "VChar" v
 
-instance FromExpresso a => FromExpresso (Maybe a) where
+instance FromValue a => FromValue (Maybe a) where
     fromValue (VMaybe m) = mapM fromValue m
     fromValue v          = failfromValue "VMaybe" v
 
-instance {-# OVERLAPS #-} FromExpresso String where
+instance {-# OVERLAPS #-} FromValue String where
     fromValue (VString s) = return s
     fromValue v           = failfromValue "VString" v
 
-instance FromExpresso a => FromExpresso [a] where
+instance FromValue a => FromValue [a] where
     fromValue (VList xs) = mapM fromValue xs
     fromValue v          = failfromValue "VList" v
 
-instance {-# OVERLAPS #-} FromExpresso [Value] where
+instance {-# OVERLAPS #-} FromValue [Value] where
     fromValue (VList xs)  = return xs
     fromValue (VString s) = return $ map VChar s
     fromValue v           = failfromValue "VList" v
 
-instance FromExpresso a => FromExpresso (HashMap Name a) where
+instance FromValue a => FromValue (HashMap Name a) where
     fromValue (VRecord m) = mapM fromValue' m
     fromValue v           = failfromValue "VRecord" v
 
-instance {-# OVERLAPS #-} FromExpresso a => FromExpresso [(Name, a)] where
+instance {-# OVERLAPS #-} FromValue a => FromValue [(Name, a)] where
     fromValue v             = HashMap.toList <$> fromValue v
 
-instance {-# OVERLAPS #-} FromExpresso (HashMap Name Thunk) where
+instance {-# OVERLAPS #-} FromValue (HashMap Name Thunk) where
     fromValue (VRecord m) = return m
     fromValue v           = failfromValue "VRecord" v
 
-instance {-# OVERLAPS #-} FromExpresso [(Name, Thunk)] where
+instance {-# OVERLAPS #-} FromValue [(Name, Thunk)] where
     fromValue v           = HashMap.toList <$> fromValue v
 
-failfromValue :: String -> Value -> EvalM a
+failfromValue :: MonadError String f => String -> Value -> f a
 failfromValue desc v = throwError $ "Expected a " ++ desc ++
     ", but got: " ++ show (ppValue v)
