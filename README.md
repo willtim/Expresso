@@ -28,7 +28,7 @@ Expresso the library and executable (the REPL) is currently built and tested usi
 
 Expresso records are built upon row-types with row extension as the fundamental primitive. This gives a very simple and easy-to-use type system when compared to more advanced systems built upon concatenation as a primitive. However, even in this simple system, concatenation can be encoded quite easily using difference records.
 
-Records can of course contain arbitrary types and be arbitrarily nested. They can also be compared for equality and ordering. The dot operator (select) is used to project out values.
+Records can of course contain arbitrary types and be arbitrarily nested. They can also be compared for equality. The dot operator (select) is used to project out values.
 
     Expresso REPL
     Type :help or :h for a list of commands
@@ -37,7 +37,7 @@ Records can of course contain arbitrary types and be arbitrarily nested. They ca
     1
     λ> {x = {y = "foo"}, z = [1,2,3]}.x.y
     "foo"
-    λ> {x = 1, y = True} > {x = 1, y = False}
+    λ> {x = 1, y = True} == {y = True, x = 1}
     True
 
 
@@ -152,13 +152,13 @@ Unlike literal records, literal variants are *open*.
 
 Variants are eliminated using the case construct, for example:
 
-    λ> case Foo 1 { Foo x: x, Bar{x,y}: x+y }
+    λ> case Foo 1 of { Foo x: x, Bar{x,y}: x+y }
     1
 
 The above case expression eliminates a *closed* variant, meaning any value other than `Foo` or `Bar` with their expected payloads would lead to a type error. To eliminate an *open* variant, we use a syntax analogous to extension:
 
-    λ> let f = x: case x { Foo x: x, Bar{x,y}: x+y | otherwise: 42 }
-    λ> f Baz{}
+    λ> let f = x: case x of { Foo x: x, Bar{x,y}: x+y | otherwise: 42 }
+    λ> f (Baz{})
     42
 
 Here the unmatched variant is bound to a variable (i.e. `otherwise`) and can be either ignored or delegated to another function.
@@ -172,11 +172,11 @@ For example, to prevent use of the `Bar` alternative of function `f` above, we c
 
 Embedding is used internally to implement overriding alternatives, for example:
 
-    λ> let g = x: case x { override Foo x: x + 1 | x': f x' }
+    λ> let g = x: case x of { override Foo x: x + 1 | x': f x' }
 
 is sugar for:
 
-    λ> let g = x: case x { Foo x: x + 1 | x': f (<|Foo|> x') }
+    λ> let g = x: case x of { Foo x: x + 1 | x': f (<|Foo|> x') }
 
     λ> :type g
     forall r1 r2. (r1\x\y, r2\Bar\Foo) => <Foo : Int, Bar : {x : Int, y : Int | r1} | r2> -> Int

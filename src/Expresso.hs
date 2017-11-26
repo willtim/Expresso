@@ -26,7 +26,7 @@ module Expresso
 import Control.Monad ((>=>))
 import Control.Monad.Except (ExceptT(..), runExceptT, throwError)
 
-import Expresso.Eval (Env, EvalM, HasValue(..), Value(..), runEvalM)
+import Expresso.Eval (Env, EvalM, FromExpresso(..), Value(..), runEvalM)
 import Expresso.InferType (TIState, initTIState)
 import Expresso.Pretty (render)
 import Expresso.Syntax
@@ -51,24 +51,24 @@ typeOfString str = runExceptT $ do
     ExceptT $ typeOf top
 
 evalWithEnv
-    :: HasValue a
+    :: FromExpresso a
     => (TypeEnv, TIState, Env)
     -> ExpI
     -> IO (Either String a)
 evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
   e    <- Parser.resolveImports ei
   _sch <- ExceptT . return $ inferTypes tEnv tState e
-  ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e
+  ExceptT $ runEvalM . (Eval.eval env >=> Eval.fromValue) $ e
 
-eval :: HasValue a => ExpI -> IO (Either String a)
+eval :: FromExpresso a => ExpI -> IO (Either String a)
 eval = evalWithEnv (mempty, initTIState, mempty)
 
-evalFile :: HasValue a => FilePath -> IO (Either String a)
+evalFile :: FromExpresso a => FilePath -> IO (Either String a)
 evalFile path = runExceptT $ do
     top <- ExceptT $ Parser.parse path <$> readFile path
     ExceptT $ eval top
 
-evalString :: HasValue a => String -> IO (Either String a)
+evalString :: FromExpresso a => String -> IO (Either String a)
 evalString str = runExceptT $ do
     top <- ExceptT $ return $ Parser.parse "<unknown>" str
     ExceptT $ eval top
@@ -78,16 +78,16 @@ bind
     :: (TypeEnv, TIState, Env)
     -> Bind Name
     -> ExpI
-    -> EvalM (TypeEnv, TIState, Env)
+    -> IO (TypeEnv, TIState, Env)
 bind (tEnv, tState, env) b ei = do
-    e     <- Parser.resolveImports ei
+    e     <- undefined $ Parser.resolveImports ei
     let (res'e, tState') =
             InferType.runTI (InferType.tiDecl (getAnn ei) b e) tEnv tState
     case res'e of
-        Left err    -> throwError err
+        Left err    -> error "bad"-- undefined $ throwError err
         Right tEnv' -> do
-            thunk <- Eval.mkThunk $ Eval.eval env e
-            env'  <- Eval.bind env b thunk
+            thunk <- undefined $ Eval.mkThunk $ Eval.eval env e
+            env'  <- undefined $ Eval.bind env b thunk
             return (tEnv', tState', env')
 
 inferTypes :: TypeEnv -> TIState -> Exp -> Either String Scheme

@@ -77,39 +77,39 @@ newtype TypeEnv = TypeEnv { unTypeEnv :: M.Map Name Scheme }
 
 instance View TypeF Type where
   proj    = left . unFix
-  inj  e  = Fix (e :*: K dummyPos)
+  toValue  e  = Fix (e :*: K dummyPos)
 
 dummyPos :: Pos
 dummyPos = newPos "<unknown>" 1 1
 
 instance View TypeF Type' where
   proj = unFix
-  inj  = Fix
+  toValue  = Fix
 
 pattern TVar v             <- (proj -> (TVarF v)) where
-  TVar v = inj (TVarF v)
+  TVar v = toValue (TVarF v)
 pattern TInt               <- (proj -> TIntF) where
-  TInt = inj TIntF
+  TInt = toValue TIntF
 pattern TDbl               <- (proj -> TDblF) where
-  TDbl = inj TDblF
+  TDbl = toValue TDblF
 pattern TBool              <- (proj -> TBoolF) where
-  TBool = inj TBoolF
+  TBool = toValue TBoolF
 pattern TChar              <- (proj -> TCharF) where
-  TChar = inj TCharF
+  TChar = toValue TCharF
 pattern TFun t1 t2         <- (proj -> (TFunF t1 t2)) where
-  TFun t1 t2 = inj (TFunF t1 t2)
+  TFun t1 t2 = toValue (TFunF t1 t2)
 pattern TMaybe t           <- (proj -> (TMaybeF t)) where
-  TMaybe t = inj (TMaybeF t)
+  TMaybe t = toValue (TMaybeF t)
 pattern TList t            <- (proj -> (TListF t)) where
-  TList t = inj (TListF t)
+  TList t = toValue (TListF t)
 pattern TRecord t          <- (proj -> (TRecordF t)) where
-  TRecord t = inj (TRecordF t)
+  TRecord t = toValue (TRecordF t)
 pattern TVariant t         <- (proj -> (TVariantF t)) where
-  TVariant t = inj (TVariantF t)
+  TVariant t = toValue (TVariantF t)
 pattern TRowEmpty          <- (proj -> TRowEmptyF) where
-  TRowEmpty = inj TRowEmptyF
+  TRowEmpty = toValue TRowEmptyF
 pattern TRowExtend l t1 t2 <- (proj -> (TRowExtendF l t1 t2)) where
-  TRowExtend l t1 t2 = inj (TRowExtendF l t1 t2)
+  TRowExtend l t1 t2 = toValue (TRowExtendF l t1 t2)
 
 class Types a where
   ftv :: a -> S.Set TyVar -- ^ free type variables
@@ -210,10 +210,10 @@ satisfies t c =
         let Star c = infer t
         in Star (min c COrd)
     infer (TRecord r)
-        | Just (Star c) <- inferFromRow r = Star (min c COrd)
+        | Just (Star c) <- inferFromRow r = Star (min c CEq)
         | otherwise = Star None
     infer (TVariant r)
-        | Just (Star c) <- inferFromRow r = Star (min c COrd)
+        | Just (Star c) <- inferFromRow r = Star (min c CEq)
         | otherwise = Star None
     infer t = error $ "satisfies/infer: unexpected type: " ++ show t
 

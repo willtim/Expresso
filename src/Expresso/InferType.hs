@@ -291,13 +291,16 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
     return $ TFun (TList TChar) a
 
   ArithPrim{}            ->
-    binOp <$> newTyVarWith' (Star CNum) 'a'
+    binOp  <$> newTyVarWith' (Star CNum) 'a'
   RelPrim{}              ->
-    binOp <$> newTyVarWith' (Star COrd) 'a'
+    binOpB <$> newTyVarWith' (Star COrd) 'a'
 
   Not                    -> return $ TFun TBool TBool
+  And                    -> return $ TFun TBool (TFun TBool TBool)
+  Or                     -> return $ TFun TBool (TFun TBool TBool)
 
   Eq                     -> binOpB <$> newTyVarWith' (Star CEq) 'a'
+  NEq                    -> binOpB <$> newTyVarWith' (Star CEq) 'a'
 
   Double                 -> return $ TFun TInt TDbl
   Floor                  -> return $ TFun TDbl TInt
@@ -366,7 +369,7 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
   EmptyAlt               -> do
       b <- newTyVar' 'b'
       return $ TFun (TVariant TRowEmpty) b
-  (VariantInject label)  -> do -- ^ dual of record select
+  (VarianttoValueect label)  -> do -- ^ dual of record select
     a <- newTyVar' 'a'
     r <- newTyVarWith' (lacks [label]) 'r'
     return $ TFun a (TVariant $ TRowExtend label a r)

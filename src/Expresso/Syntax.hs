@@ -46,7 +46,10 @@ data Prim
   | ArithPrim ArithOp
   | RelPrim   RelOp
   | Not
+  | And
+  | Or
   | Eq
+  | NEq
   | Double      -- double from int
   | Floor
   | Ceiling
@@ -70,7 +73,7 @@ data Prim
   | RecordExtend Label
   | RecordRestrict Label
   | EmptyAlt
-  | VariantInject Label
+  | VarianttoValueect Label
   | VariantEmbed Label
   | VariantElim Label
   deriving (Eq, Ord, Show)

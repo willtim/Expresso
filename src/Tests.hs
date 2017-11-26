@@ -16,7 +16,7 @@ unitTests = testGroup
   , recordTests
   , variantTests
   , listTests
-  , primTests
+  , relationalTests
   ]
 
 letTests = testGroup
@@ -71,23 +71,23 @@ recordTests = testGroup
 
 variantTests = testGroup
   "Variant expressions"
-  [ hasValue "case Foo 1 { Foo x: x + 1, Bar {x, y}: x + y }"   (2::Integer)
-  , hasValue "case Bar {x=1, y=2} { Foo x: x + 1, Bar {x, y}: x + y }"   (3::Integer)
-  , illTyped "case Baz{} { Foo x: x + 1, Bar {x, y}: x + y }" -- fails to typecheck
-  , hasValue "case Baz{} { Foo x: x + 1, Bar {x, y}: x + y | otherwise: 42 }"  (42::Integer)
-  , illTyped "let f = s: case s { Foo x: x + 1, Bar {x, y}: x + y }; g = s: f (<|Foo|> s) in g Foo 1" -- fails to typecheck
-  , hasValue "let f = s: case s { Foo x: x + 1, Bar {x, y}: x + y }; g = s: f (<|Foo|> s) in g Bar {x=1, y=2}" (3::Integer)
-  , hasValue "let f = s: case s { Foo x: x + 1, Bar {x, y}: x + y | otherwise: 42 }; g = s: f (<|Foo,Bar|> s) in g Baz{}"  (42::Integer)
-  , hasValue "case Foo 1 { override Foo x: x + 2 | s: case s { Foo x: x + 1 }}" (3::Integer)
-  , hasValue "case Foo 1 { override Foo x: x + 2, Foo x: x + 1 }" (3::Integer)
+  [ hasValue "case Foo 1 of { Foo x: x + 1, Bar {x, y}: x + y }"   (2::Integer)
+  , hasValue "case Bar {x=1, y=2} of { Foo x: x + 1, Bar {x, y}: x + y }"   (3::Integer)
+  , illTyped "case Baz{} of { Foo x: x + 1, Bar {x, y}: x + y }" -- fails to typecheck
+  , hasValue "case Baz{} of { Foo x: x + 1, Bar {x, y}: x + y | otherwise: 42 }"  (42::Integer)
+  , illTyped "let f = s: case s of { Foo x: x + 1, Bar {x, y}: x + y }; g = s: f (<|Foo|> s) in g (Foo 1)" -- fails to typecheck
+  , hasValue "let f = s: case s of { Foo x: x + 1, Bar {x, y}: x + y }; g = s: f (<|Foo|> s) in g (Bar{x=1, y=2})" (3::Integer)
+  , hasValue "let f = s: case s of { Foo x: x + 1, Bar {x, y}: x + y | otherwise: 42 }; g = s: f (<|Foo,Bar|> s) in g (Baz{})"  (42::Integer)
+  , hasValue "case Foo 1 of { override Foo x: x + 2 | s: case s of { Foo x: x + 1 }}" (3::Integer)
+  , hasValue "case Foo 1 of { override Foo x: x + 2, Foo x: x + 1 }" (3::Integer)
 
   -- Fail in empty row case
-  , illTyped "x: case x { A{}: 1, B{}: 2, A{}: 3 }"
+  , illTyped "x: case x of { A{}: 1, B{}: 2, A{}: 3 }"
   -- Fail in row var case
   , illTyped "x: <|A, B, A|> x"
   -- Failed row rewrite due to row constraints
-  , illTyped ("let f = x: case (<|A|> x) { B{}: 1, otherwise: -> 2 }; " ++
-              "let g = x: case (<|B|> x) { A{}: 1, otherwise: -> 2 } in " ++
+  , illTyped ("let f = x: case (<|A|> x) of { B{}: 1, otherwise: -> 2 }; " ++
+              "let g = x: case (<|B|> x) of { A{}: 1, otherwise: -> 2 } in " ++
               "x: f x + f x")
   ]
 
@@ -98,13 +98,23 @@ listTests = testGroup
   -- "x: y: [x, y]"
   ]
 
-primTests = testGroup
-  "Primitive expressions"
+relationalTests = testGroup
+  "Relational expressions"
   [ hasValue "(1 == 2)" False
+  , hasValue "1/=2" True
   , illTyped "1 == 2 == 3"
+  , hasValue "{x = 1, y = True} == {y = True, x = 1}" True -- field order should not matter
+  , illTyped "{x = 1, y = True} > {y = True, x = 1}" -- cannot compare records for ordering
+  , illTyped "Foo 1 > Bar{}" -- cannot compare variants for ordering
+  , hasValue "[1,2,3] == [1,2,3]" True -- lists can be compared for equality
+  , hasValue "[1,2,3] >= [1,2,2]" True -- lists can be compared for ordering
+  , hasValue "Just 1 == Just 1" True -- maybe can be compared for equality
+  , hasValue "Just 2 >= Just 1" True -- maybe can be compared for ordering
+  , hasValue "True&&True"   True
+  , hasValue "True||False"  True
   ]
 
-hasValue :: (Eq a, Show a, HasValue a) => String -> a -> TestTree
+hasValue :: (Eq a, Show a, FromExpresso a) => String -> a -> TestTree
 hasValue str expected = testCase str $ do
     result <- evalString str
     case result of
@@ -120,8 +130,8 @@ illTyped str = testCase str $ do
 
 assertTrue = return ()
 
-(-->) :: HasValue a => Name -> a -> (Name, a)
+(-->) :: FromExpresso a => Name -> a -> (Name, a)
 (-->) l v = (l, v)
 
-toMap :: (Eq a, Show a, HasValue a) => [(Name, a)] -> HashMap Name a
+toMap :: (Eq a, Show a, FromExpresso a) => [(Name, a)] -> HashMap Name a
 toMap = HashMap.fromList

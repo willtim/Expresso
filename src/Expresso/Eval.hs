@@ -19,7 +19,7 @@ module Expresso.Eval(
   , runEvalM
   , Env
   , EvalM
-  , HasValue(..)
+  , FromExpresso(..)
   , Value(..)
   , ppValue
   , ppValue'
@@ -36,12 +36,14 @@ import Data.IORef
 import Data.Coerce
 import Data.Maybe
 import Data.Monoid
+import Data.Ord
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.List as List
 import Control.Monad.ST
 import Data.STRef
 import Data.Void
 import Data.Functor.Identity
+import Data.Proxy
 
 import Expresso.Syntax
 import Expresso.Type
@@ -85,7 +87,7 @@ data Value
   | VString  !String  -- an optimisation
   | VMaybe   !(Maybe Value)
   | VList    ![Value] -- lists are strict
-  | VRecord  ![Label] !(HashMap Label Thunk) -- maintain field order
+  | VRecord  !(HashMap Label Thunk) -- field order no defined
   | VVariant !Label !Thunk
 
 -- | This does *not* evaluate deeply
@@ -100,17 +102,17 @@ ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppValue v) mx
 ppValue (VList xs)
     | Just str <- mapM extractChar xs = dquotes $ text str
     | otherwise     = bracketsList $ map ppValue xs
-ppValue (VRecord ls _) = bracesList $ map ppEntry ls
+ppValue (VRecord m) = bracesList $ map ppEntry $ HashMap.keys m
   where
     ppEntry l = text l <+> "=" <+> "<Thunk>"
 ppValue (VVariant l _) = text l <+> "<Thunk>"
 
 -- | This evaluates deeply
 ppValue' :: Value -> EvalM Doc
-ppValue' (VRecord ls m) = (bracesList . zipWith ppEntry ls . recordValues ls)
-                          <$> mapM (force >=> ppValue') m
+ppValue' (VRecord m) = (bracesList . map ppEntry . HashMap.toList)
+                           <$> mapM (force >=> ppValue') m
   where
-    ppEntry l v = text l <+> text "=" <+> v
+    ppEntry (l, v) = text l <+> text "=" <+> v
 ppValue' (VVariant l t) = (text l <+>) <$> (force >=> ppValue') t
 ppValue' v = return $ ppValue v
 
@@ -119,7 +121,7 @@ extractChar (VChar c) = Just c
 extractChar _ = Nothing
 
 runEvalM :: EvalM a -> IO (Either String a)
-runEvalM = undefined
+runEvalM = pure . runEvalM'
 
 runEvalM' :: EvalM a -> Either String a
 runEvalM' = runIdentity . runExceptT . runEvalT
@@ -161,7 +163,7 @@ evalPrim pos p = case p of
     Show          -> mkStrictLam $ \v -> VString . show <$> ppValue' v
     -- Trace
     ErrorPrim     -> VLam $ \s -> do
-        msg <- proj' s
+        msg <- fromValue' s
         throwError $ "error (" ++ show pos ++ "):" ++ msg
 
     ArithPrim Add -> mkStrictLam2 $ numOp pos (+)
@@ -188,7 +190,15 @@ evalPrim pos p = case p of
     Eq            -> mkStrictLam2 $ \v1 v2 ->
         VBool <$> equalValues pos v1 v2
 
-    Not           -> VLam $ \v -> VBool <$> proj' v
+    NEq           -> mkStrictLam2 $ \v1 v2 ->
+        (VBool . not) <$> equalValues pos v1 v2
+
+    Not           -> VLam $ \v -> VBool <$> fromValue' v
+    And           -> VLam $ \v1 -> return $ VLam $ \v2 ->
+        VBool <$> ((&&) <$> fromValue' v1 <*> fromValue' v2)
+
+    Or            -> VLam $ \v1 -> return $ VLam $ \v2 ->
+        VBool <$> ((||) <$> fromValue' v1 <*> fromValue' v2)
 
     Double        -> mkStrictLam $ \v ->
         case v of
@@ -215,7 +225,7 @@ evalPrim pos p = case p of
             _                -> failOnValues pos [v1, v2]
 
     Cond     -> VLam $ \c -> return $ VLam $ \t -> return $ VLam $ \f ->
-        proj' c >>= \c -> if c then force t else force f
+        fromValue' c >>= \c -> if c then force t else force f
     FixPrim       -> mkStrictLam $ \f -> fix (evalApp pos f <=< mkThunk)
 
     -- We cannot yet define operators like this in the language
@@ -236,32 +246,28 @@ evalPrim pos p = case p of
 
     ListEmpty     -> VList []
     ListNull      -> VLam $ \xs ->
-        (VBool . (null :: [Value] -> Bool)) <$> proj' xs
+        (VBool . (null :: [Value] -> Bool)) <$> fromValue' xs
     ListCons      -> VLam $ \x -> return $ VLam $ \xs ->
-        VList <$> ((:) <$> force x <*> proj' xs)
+        VList <$> ((:) <$> force x <*> fromValue' xs)
     ListAppend    -> VLam $ \xs -> return $ VLam $ \ys ->
-        VList <$> ((++) <$> proj' xs <*> proj' ys)
+        VList <$> ((++) <$> fromValue' xs <*> fromValue' ys)
     ListFoldr     -> mkStrictLam $ \f ->
         return $ VLam $ \z -> return $ VLam $ \xs -> do
         let g a b = do g' <- evalApp pos f (Thunk $ return a)
                        evalApp pos g' (Thunk $ return b)
         z'  <- force z
-        xs' <- proj' xs :: EvalM [Value]
+        xs' <- fromValue' xs :: EvalM [Value]
         foldrM g z' xs'
-    RecordExtend l   -> VLam $ \v -> return $ mkStrictLam $ \r ->
-        case r of
-          VRecord ls m -> return $ VRecord (l:ls) (HashMap.insert l v m)
-          _ -> failOnValues pos [r]
-    RecordRestrict l -> mkStrictLam $ \r ->
-        case r of
-          VRecord ls m -> return $ VRecord (List.delete l ls) (HashMap.delete l m)
-          _ -> failOnValues pos [r]
+    RecordExtend l   -> VLam $ \v -> return $ VLam $ \r ->
+        (VRecord . HashMap.insert l v) <$> fromValue' r
+    RecordRestrict l -> VLam $ \r ->
+        (VRecord . HashMap.delete l) <$> fromValue' r
     RecordSelect l   -> VLam $ \r -> do
-        r' <- proj' r
+        r' <- fromValue' r
         let err = throwError $ show pos ++ " : " ++ l ++ " not found"
         maybe err force (HashMap.lookup l r')
-    RecordEmpty -> VRecord [] mempty
-    VariantInject l  -> VLam $ \v ->
+    RecordEmpty -> VRecord mempty
+    VarianttoValueect l  -> VLam $ \v ->
         return $ VVariant l v
     VariantEmbed _   -> VLam force
     VariantElim l    -> mkStrictLam $ \f -> return $ mkStrictLam2 $ \k s -> do
@@ -286,9 +292,9 @@ bind' env b t = do
   case (b, v) of
     (Arg n, _)               ->
         return $ HashMap.insert n (Thunk $ return v) env
-    (RecArg ns, VRecord _ m) ->
-        return $ env <> (HashMap.fromList $ zip ns $ recordValues ns m)
-    (RecWildcard, VRecord _ m) ->
+    (RecArg ns, VRecord m) | Just vs <- mapM (\n -> HashMap.lookup n m) ns ->
+        return $ env <> (HashMap.fromList $ zip ns vs)
+    (RecWildcard, VRecord m) ->
         return $ env <> m
     _ -> throwError $ "Cannot bind the pair: " ++ show b ++ " = " ++ show (ppValue v)
 
@@ -307,8 +313,8 @@ mkStrictLam f = VLam $ \x -> force x >>= f
 mkStrictLam2 :: (Value -> Value -> EvalM Value) -> Value
 mkStrictLam2 f = mkStrictLam $ \v -> return $ mkStrictLam $ f v
 
-proj' :: HasValue a => Thunk -> EvalM a
-proj' = force >=> proj
+fromValue' :: FromExpresso a => Thunk -> EvalM a
+fromValue' = force >=> fromValue
 
 numOp :: Pos -> (forall a. Num a => a -> a -> a) -> Value -> Value -> EvalM Value
 numOp _ op (VInt x) (VInt y) = return $ VInt $ x `op` y
@@ -330,14 +336,12 @@ equalValues p (VMaybe m1)  (VMaybe m2)  =
 equalValues p (VList xs)   (VList ys)
     | length xs == length ys = and <$> zipWithM (equalValues p) xs ys
     | otherwise = return False
-equalValues p (VRecord ls1 m1) (VRecord ls2 m2)
-    | ls1 == ls2 = do
-    vs1 <- recordValues ls1 <$> mapM force m1
-    vs2 <- recordValues ls2 <$> mapM force m2
-    if length vs1 == length vs2
+equalValues p (VRecord m1) (VRecord m2) = do
+    (ls1, vs1) <- unzip . recordValues <$> mapM force m1
+    (ls2, vs2) <- unzip . recordValues <$> mapM force m2
+    if length ls1 == length ls2 && length vs1 == length vs2
        then and <$> zipWithM (equalValues p) vs1 vs2
        else return False
-    | otherwise = return False
 equalValues p (VVariant l1 v1) (VVariant l2 v2)
     | l1 == l2  = join $ equalValues p <$> force v1 <*> force v2
     | otherwise = return False
@@ -367,103 +371,122 @@ compareValues p (VList xs)   (VList ys)   = go xs ys
           if c == EQ
               then go xs' ys'
               else return c
-compareValues p (VRecord ls1 m1) (VRecord ls2 m2) = do
-    vs1 <- recordValues ls1 <$> mapM force m1
-    vs2 <- recordValues ls2 <$> mapM force m2
-    let c = compare ls1 ls2
-    if c == EQ
-       then compareValues p (VList vs1) (VList vs2)
-       else return c
-compareValues p (VVariant l1 v1) (VVariant l2 v2) =
-    let c = compare l1 l2
-    in if c == EQ
-        then join $ compareValues p <$> force v1 <*> force v2
-        else return c
 compareValues p v1 v2 = failOnValues p [v1, v2]
 
--- | Used for ordering and pretty-printing of records
-recordValues :: [Label] -> HashMap Label a -> [a]
-recordValues ls m = fromMaybe err $ mapM (\l -> HashMap.lookup l m) ls
-  where
-    err = error "recordValues: assertion failed"
+-- | Used for equality of records, sorts values by key
+recordValues :: HashMap Label a -> [(Label, a)]
+recordValues = List.sortBy (comparing fst) . HashMap.toList
 
 ------------------------------------------------------------
--- HasValue class and instances
+-- FromExpresso class and instances
 
-class Inject a where
-    inj :: a -> Value
-instance Inject Integer where
-    inj = VInt
-instance Inject Double where
-    inj = VDbl
-instance Inject Char where
-    inj = VChar
+class HasType a where
+    typeOf :: proxy a -> Type
+class ToExpresso a where
+    toValue :: a -> Value
+class FromExpresso a where
+    fromValue :: Value -> EvalM a
+
+instance HasType Integer where
+    typeOf _ = TInt
+instance HasType Double where
+    typeOf _ = TDbl
+instance HasType Bool where
+    typeOf _ = TBool
+instance HasType Char where
+    typeOf _ = TChar
+instance (HasType a, HasType b) => HasType (a -> b) where
+    typeOf p = TFun (typeOf $ dom p) (typeOf $ inside p)
+instance HasType a => HasType (Maybe a) where
+    typeOf p = TMaybe (typeOf $ inside p)
+instance HasType a => HasType [a] where
+    typeOf p = TList (typeOf $ inside p)
+instance HasType Void where
+    typeOf p = TVariant TRowEmpty
+instance HasType () where
+    typeOf p = TRecord TRowEmpty
+
+inside :: proxy (f a) -> Proxy a
+inside = const Proxy
+
+dom :: proxy (a -> b) -> Proxy a
+dom = const Proxy
+
+codom :: proxy (a -> b) -> Proxy b
+codom = inside
+
+
+
+instance ToExpresso Integer where
+    toValue = VInt
+instance ToExpresso Double where
+    toValue = VDbl
+instance ToExpresso Char where
+    toValue = VChar
 
 -- TODO generic derivation a la GG
 
 -- TODO write pure evaluator in ST, carry type in class to get rid of Either/Maybe to get
---    instance (Inject a, HasValue b) => HasValue (a -> b) where
-instance (Inject a, HasValue b) => HasValue (a -> Either String b) where
-    proj (VLam f) = pure $ \x -> runEvalM' $ do
-      x <- (mkThunk $ pure $ inj x)
+--    instance (ToExpresso a, FromExpresso b) => FromExpresso (a -> b) where
+instance (ToExpresso a, FromExpresso b) => FromExpresso (a -> Either String b) where
+    fromValue (VLam f) = pure $ \x -> runEvalM' $ do
+      x <- (mkThunk $ pure $ toValue x)
       r <- f x
-      proj r
-    -- proj v        = failProj "VLam" v
+      fromValue r
+    -- fromValue v        = failfromValue "VLam" v
 
 
-class HasValue a where
-    proj :: Value -> EvalM a
 
-instance HasValue Value where
-    proj v        = return v
+-- instance FromExpresso Value where
+    -- fromValue v        = return v
 
-instance HasValue Integer where
-    proj (VInt i) = return i
-    proj v        = failProj "VInt" v
+instance FromExpresso Integer where
+    fromValue (VInt i) = return i
+    fromValue v        = failfromValue "VInt" v
 
-instance HasValue Double where
-    proj (VDbl d) = return d
-    proj v        = failProj "VDbl" v
+instance FromExpresso Double where
+    fromValue (VDbl d) = return d
+    fromValue v        = failfromValue "VDbl" v
 
-instance HasValue Bool where
-    proj (VBool b) = return b
-    proj v         = failProj "VBool" v
+instance FromExpresso Bool where
+    fromValue (VBool b) = return b
+    fromValue v         = failfromValue "VBool" v
 
-instance HasValue Char where
-    proj (VChar c) = return c
-    proj v         = failProj "VChar" v
+instance FromExpresso Char where
+    fromValue (VChar c) = return c
+    fromValue v         = failfromValue "VChar" v
 
-instance HasValue a => HasValue (Maybe a) where
-    proj (VMaybe m) = mapM proj m
-    proj v          = failProj "VMaybe" v
+instance FromExpresso a => FromExpresso (Maybe a) where
+    fromValue (VMaybe m) = mapM fromValue m
+    fromValue v          = failfromValue "VMaybe" v
 
-instance {-# OVERLAPS #-} HasValue String where
-    proj (VString s) = return s
-    proj v           = failProj "VString" v
+instance {-# OVERLAPS #-} FromExpresso String where
+    fromValue (VString s) = return s
+    fromValue v           = failfromValue "VString" v
 
-instance HasValue a => HasValue [a] where
-    proj (VList xs) = mapM proj xs
-    proj v          = failProj "VList" v
+instance FromExpresso a => FromExpresso [a] where
+    fromValue (VList xs) = mapM fromValue xs
+    fromValue v          = failfromValue "VList" v
 
-instance {-# OVERLAPS #-} HasValue [Value] where
-    proj (VList xs)  = return xs
-    proj (VString s) = return $ map VChar s
-    proj v           = failProj "VList" v
+instance {-# OVERLAPS #-} FromExpresso [Value] where
+    fromValue (VList xs)  = return xs
+    fromValue (VString s) = return $ map VChar s
+    fromValue v           = failfromValue "VList" v
 
-instance HasValue a => HasValue (HashMap Name a) where
-    proj (VRecord _ m) = mapM proj' m
-    proj v             = failProj "VRecord" v
+instance FromExpresso a => FromExpresso (HashMap Name a) where
+    fromValue (VRecord m) = mapM fromValue' m
+    fromValue v           = failfromValue "VRecord" v
 
-instance {-# OVERLAPS #-} HasValue a => HasValue [(Name, a)] where
-    proj v             = HashMap.toList <$> proj v
+instance {-# OVERLAPS #-} FromExpresso a => FromExpresso [(Name, a)] where
+    fromValue v             = HashMap.toList <$> fromValue v
 
-instance {-# OVERLAPS #-} HasValue (HashMap Name Thunk) where
-    proj (VRecord _ m) = return m
-    proj v             = failProj "VRecord" v
+instance {-# OVERLAPS #-} FromExpresso (HashMap Name Thunk) where
+    fromValue (VRecord m) = return m
+    fromValue v           = failfromValue "VRecord" v
 
-instance {-# OVERLAPS #-} HasValue [(Name, Thunk)] where
-    proj v             = HashMap.toList <$> proj v
+instance {-# OVERLAPS #-} FromExpresso [(Name, Thunk)] where
+    fromValue v           = HashMap.toList <$> fromValue v
 
-failProj :: String -> Value -> EvalM a
-failProj desc v = throwError $ "Expected a " ++ desc ++
+failfromValue :: String -> Value -> EvalM a
+failfromValue desc v = throwError $ "Expected a " ++ desc ++
     ", but got: " ++ show (ppValue v)
