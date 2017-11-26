@@ -14,6 +14,7 @@ import Text.PrettyPrint.Leijen ( Doc, (<+>), (<//>), angles, braces, brackets
                                , comma, dot, dquotes, hcat, hsep, indent
                                , int, integer, double, parens, space, text)
 import qualified Text.PrettyPrint.Leijen as PP
+import Data.Monoid
 
 instance IsString Doc where
   fromString = text

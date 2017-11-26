@@ -148,6 +148,8 @@ doCommand c = case c of
     , ""
     ]
 
+instance FromExpresso Value -- FIXME
+
 doEval :: (Value -> IO String) -> ExpI -> Repl ()
 doEval pp e = do
   envs <- lift $ gets stateEnv
@@ -159,7 +161,7 @@ doEval pp e = do
 doDecl :: Bind Name -> ExpI -> Repl ()
 doDecl b e = do
   envs   <- lift $ gets stateEnv
-  envs'e <- liftIO $ runEvalM $ bind envs b e
+  envs'e <- liftIO $ fmap pure $ bind envs b e
   case envs'e of
       Left err    -> spew err
       Right envs' -> lift $ modify (setEnv envs')

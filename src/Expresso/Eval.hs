@@ -1,8 +1,10 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE StandaloneDeriving #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
@@ -55,10 +57,10 @@ import Expresso.Utils (cata, (:*:)(..), K(..))
 type Env = HashMap Name Thunk
 
 newtype EvalM a = EvalM { runEvalT :: ExceptT String Identity a }
-instance Functor EvalM
-instance Applicative EvalM
-instance Monad EvalM
-instance MonadError String EvalM
+deriving instance Functor EvalM
+deriving instance Applicative EvalM
+deriving instance Monad EvalM
+deriving instance MonadError String EvalM
 
 newtype Thunk = Thunk { force :: EvalM Value }
 
