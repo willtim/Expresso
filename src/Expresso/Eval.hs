@@ -437,7 +437,8 @@ instance (GHasType f, G.Selector c) => GHasType (G.S1 c f) where
     gtypeOf opts ct = setTag (G.selName m) . gtypeOf opts ct . fmap G.unM1
       where m = (undefined :: t c f a)
 
--- FIXME, this replaces self recursion with recursion in the variable...
+-- FIXME this allows infinite types to be generated
+-- Can we forbid recursive Haskell types altogether?
 instance HasType c => GHasType (G.K1 t c) where
     gtypeOf opts ct proxy = typeOfWith opts NoCtx (G.unK1 <$> proxy)
 
@@ -537,8 +538,6 @@ instance HasType a => HasType [a] where
 
 
 -- FIXME move
--- TODO challenge: derive TypeOf/ToValue/FromValue for tree
---
 -- <Leaf:Int | <Node:{left:Int,right:[Int]} | <>>>
 data Foo a = Leaf a | Node { left :: a, right :: [a] }
   deriving G.Generic
