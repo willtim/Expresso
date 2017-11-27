@@ -58,6 +58,8 @@ import Data.Void
 import Data.Functor.Identity
 import Data.Proxy
 import qualified GHC.Generics as G
+import GHC.TypeLits
+
 
 import Expresso.Syntax
 import Expresso.Type
@@ -670,6 +672,43 @@ failfromValue desc v = throwError $ "Expected a " ++ desc ++
 
 
 
+-- data N = Z | S N
+-- type family +
+
+-- instance Data x Void
+-- instance Data x ()
+
+
+-- type family Data (f :: k) :: Nat where
+  -- Data
+-- instance GData n (G.Rep a) => Data n a
+
+-- type family GData (f :: k1 -> k) :: Nat where
+--   GData (G.K1 G.R a) = GData (G.Rep a) + 1
+--   GData (G.U1) = 0
+--   GData (G.V1) = 0
+--   GData (G.C1 c f) = GData f
+--   GData (G.D1 c f) = GData f
+--   GData (G.S1 c f) = GData f
+--   GData (f G.:*: g) = GData f + GData g
+--   GData (f G.:+: g) = GData f + GData g
+--
+-- type Data a = GData (G.Rep a)
+-- class KnownNat (Data a) => IsData a where
+-- instance IsData ()
+-- instance IsData Void
+-- -- instance IsData a => IsData (Foo a)
+-- instance IsData a => IsData (Maybe a)
+
+-- type instance GData (n + 1) (G.Rep a) => GData (G.K1 G.R a) +
+-- type instance GData 0 (G.U1)
+-- type instance GData 0 (G.V1)
+-- type instance (GData n f) => GData n (G.M1 G.C c f) where
+-- type instance GData n f => GData n (G.D1 c f) where
+-- type instance (GData n f) => GData n (G.S1 c f) where
+-- type instance (GData m f, GData n g) => GData m (f G.:*: g) where
+-- instance (GData m f, GData n g) => GData (m + n) (f G.:+: g) where
+-- instance (GData m f, GData n g) => GData (m + n) (f G.:+: g) where
 
 
 -- module IsRecursive where
