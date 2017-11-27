@@ -1,5 +1,6 @@
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
+{-# LANGUAGE DataKinds #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
@@ -10,10 +11,15 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TypeOperators #-}
+{-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+-- For the anti-recursion stuff
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE OverlappingInstances #-}
 
 ------------------------------------------------------------
 --
@@ -57,6 +63,9 @@ import Expresso.Syntax
 import Expresso.Type
 import Expresso.Pretty
 import Expresso.Utils (cata, (:*:)(..), K(..))
+import qualified Expresso.InferType as Infer
+import qualified Expresso.Parser as Parser
+
 import Debug.Trace
 
 -- call-by-need environment
@@ -391,6 +400,30 @@ compareValues p v1 v2 = failOnValues p [v1, v2]
 recordValues :: HashMap Label a -> [(Label, a)]
 recordValues = List.sortBy (comparing fst) . HashMap.toList
 
+----------------
+
+inferTypes :: TypeEnv -> Infer.TIState -> Exp -> Either String Scheme
+inferTypes tEnv tState e =
+    fst $ Infer.runTI (Infer.typeInference e) tEnv tState
+
+-- Copied/adapter from top-level...
+inferTypeWithEnv :: TypeEnv -> Infer.TIState -> ExpI -> IO (Either String Scheme)
+inferTypeWithEnv tEnv tState ei = runExceptT $ do
+    e <- Parser.resolveImports ei
+    ExceptT $ return $ inferTypes tEnv tState e
+
+inferType :: ExpI -> IO (Either String Scheme)
+inferType = inferTypeWithEnv mempty Infer.initTIState
+
+-- TODO version of eval that returns a typed expression (using phantoms : monotypes only)
+-- This should allow us to write a safe:
+--
+--   instance (ToValue a, FromValue b) => FromValue (a -> b) where
+--      fromValueSafe :: MonadEval f => TypedValue (a -> b) -> f (a -> b)
+--   toValueSafe :: ToValue a => a -> TypedValue a
+--   refineValue :: ApplicativeError ... f => Value -> (forall a . TypedValue a -> f r) -> f r
+--   unrefineValue :: TypedValue a -> Value
+
 ------------------------------------------------------------
 -- FromValue class and instances
 
@@ -524,10 +557,10 @@ instance HasType Void
 instance HasType ()
 instance HasType Bool
 instance HasType Ordering
-instance HasType a => HasType (Maybe a)
+instance (HasType a) => HasType (Maybe a)
 instance (HasType a, HasType b) => HasType (Either a b)
 instance (HasType a, HasType b) => HasType (a, b)
-instance (HasType a, HasType b, HasType c) => HasType (a, b, c)
+-- instance (HasType a, HasType b, HasType c) => HasType (a, b, c)
 -- instance ToValue a => ToValue (Maybe a)
 instance HasType a => HasType [a] where
     typeOfWith opts ct p = TList <$> typeOfWith opts ct (inside p)
@@ -539,14 +572,15 @@ instance HasType a => HasType [a] where
 
 -- FIXME move
 -- <Leaf:Int | <Node:{left:Int,right:[Int]} | <>>>
-data Foo a = Leaf a | Node { left :: a, right :: [a] }
+data Foo a = Leaf a | Node { left :: a, right :: a }
   deriving G.Generic
-instance HasType a => HasType (Foo a)
+instance (HasType a) => HasType (Foo a)
 instance ToValue a => ToValue (Foo a)
+instance FromValue a => FromValue (Foo a)
 
 data Tree a = TLeaf a | TNode { tleft :: a, tright :: Tree a }
   deriving G.Generic
-instance HasType a => HasType (Tree a)
+instance (HasType a) => HasType (Tree a)
 -- instance ToValue a => ToValue (Foo a)
 
 inside :: proxy (f a) -> Proxy a
@@ -633,3 +667,66 @@ instance {-# OVERLAPS #-} FromValue [(Name, Thunk)] where
 failfromValue :: MonadError String f => String -> Value -> f a
 failfromValue desc v = throwError $ "Expected a " ++ desc ++
     ", but got: " ++ show (ppValue v)
+
+
+
+
+
+-- module IsRecursive where
+--
+-- import GHC.Generics
+-- import Data.Proxy
+--
+-- type family (:||) (a :: Bool) (b :: Bool) :: Bool where
+--   True  :|| False = True
+--   True  :|| True  = True
+--   False :|| True = True
+--   False :|| False = False
+-- type family (:&&) (a :: Bool) (b :: Bool) :: Bool where
+--   True :&& True = True
+--   a :&& b = False
+-- type family Not (a :: Bool) :: Bool where
+--   Not True = False
+--   Not False = True
+-- data T2 a b
+--
+-- type family Elem (x :: k) (xs :: [k]) :: Bool where
+--   Elem x '[] = False
+--   Elem x (x ': xs) = True
+--   Elem x (y ': xs) = Elem x xs
+--
+-- class IsRecursive' (tys :: [* -> *]) (rep :: * -> *) (r :: *) | tys rep -> r where
+--   isRecursive' :: Proxy tys -> Proxy rep -> Proxy r
+--   isRecursive' _ _ = Proxy
+--
+-- -- These types have recursive `Rep`s but aren't recursive because there is no `Rep` for primitive types
+-- instance IsRecursive' tys (G.K1 G.R Int)    (T2 False tys)
+-- instance IsRecursive' tys (G.K1 G.R Double) (T2 False tys)
+-- instance IsRecursive' tys (G.K1 G.R Char)   (T2 False tys)
+-- instance IsRecursive' tys (G.K1 G.R Float)  (T2 False tys)
+--
+-- -- Recursive instances - unwrap one layer of `Rep` and look inside
+-- instance IsRecursive' tys G.V1 (T2 False tys)
+-- instance IsRecursive' tys G.U1 (T2 False tys)
+-- instance IsRecursive' tys (G.Rep c) r => IsRecursive' tys (G.K1 i c) r
+-- instance (IsRecursive' tys f (T2 r0 tys0), IsRecursive' tys g (T2 r1 tys1), r2 ~ (r0 :|| r1)) => IsRecursive' tys (f G.:+: g) (T2 r2 tys1)
+-- instance (IsRecursive' tys f (T2 r0 tys0), IsRecursive' tys g (T2 r1 tys1), r2 ~ (r0 :|| r1)) => IsRecursive' tys (f G.:*: g) (T2 r2 tys1)
+-- instance (IsRecursive' tys f r) => IsRecursive' tys (G.M1 i c f) r
+--
+-- -- This is where the magic happens
+-- -- Datatype declaration reps are represented as `M1 D`
+-- -- When one is encountered, save it in the list so far and continue recursion
+-- instance (IsRecDataDec (Elem tyrep tys) tyrep tys f r, tyrep ~ (G.M1 G.D c f)) => IsRecursive' tys (G.M1 G.D c f) r
+--
+-- -- Context reduction is strict, so this class makes sure we
+-- -- only recurse if `Elem tyrep tys == False`; otherwise every recursive type
+-- -- would cause a stack overflow
+-- class IsRecDataDec (b :: Bool) (c :: * -> *) (tys :: [* -> *]) (f :: * -> *) (r :: *) | b c tys f -> r
+-- instance IsRecDataDec True c tys f (T2 True (c ': tys))
+-- instance IsRecursive' (c ': tys) f r => IsRecDataDec False c tys f r
+--
+-- class IsRecursive t
+-- instance IsRecursive' '[] (G.Rep t) (T2 True tys) => IsRecursive t
+--
+-- class IsNonRecursive t
+-- instance IsRecursive' '[] (G.Rep t) (T2 False tys) => IsNonRecursive t
