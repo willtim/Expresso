@@ -57,6 +57,7 @@ import Expresso.Syntax
 import Expresso.Type
 import Expresso.Pretty
 import Expresso.Utils (cata, (:*:)(..), K(..))
+import Debug.Trace
 
 -- call-by-need environment
 -- A HashMap makes it easy to support record wildcards
@@ -403,33 +404,81 @@ defaultOptions = Options
 -- TODO generalize proxy?
 class HasType a where
     typeOf :: Proxy a -> Type
-    default typeOf :: (G.Generic a, GHasType (G.Rep a)) => Proxy a -> Type
-    typeOf = snd . gtypeOf defaultOptions . fmap G.from
+    typeOf = snd . typeOfWith defaultOptions NoCtx
+
+    typeOfWith :: Options -> Ctx -> Proxy a -> (Maybe String, Type)
+    default typeOfWith :: (G.Generic a, GHasType (G.Rep a)) => Options -> Ctx -> Proxy a -> (Maybe String, Type)
+    typeOfWith opts ct = gtypeOf opts ct . fmap G.from
+
+-- | This thing is passed around when traversing generic representations of Haskell types to keep track
+-- of the surrounding context. We need this to properly decompose Haskell ADTs with >2 constructors into
+-- proper (right-associative) rows. For records we also keep track of the number of elements, so we
+-- can generate default selector functions _1, _2, _3 etc.
+data Ctx = NoCtx | Var | Rec Int
+
 setTag :: b -> (Maybe b, a) -> (Maybe b, a)
 setTag b (_, a) = (Just b, a)
 class GHasType f where
-    gtypeOf :: Options -> Proxy (f x) -> (Maybe String, Type)
+    gtypeOf :: Options -> Ctx -> Proxy (f x) -> (Maybe String, Type)
 instance (GHasType f, G.Constructor c) => GHasType (G.M1 G.C c f) where
-    gtypeOf opts = setTag (G.conName m) . gtypeOf opts . fmap G.unM1
+    gtypeOf opts ct = setTag (G.conName m) . gtypeOf opts ct . fmap G.unM1
       where m = (undefined :: t c f a)
-instance GHasType f => GHasType (G.D1 meta f) where
-    gtypeOf opts = gtypeOf opts . fmap G.unM1
+instance GHasType f => GHasType (G.D1 c f) where
+    gtypeOf opts ct = gtypeOf opts ct . fmap G.unM1
+
+instance GHasType (G.U1) where
+    gtypeOf opts Rec{} _  = pure $ TRowEmpty
+    gtypeOf opts _ _    = pure $ TRecord $ TRowEmpty
+instance GHasType (G.V1) where
+    gtypeOf opts Var _ = pure $ TRowEmpty
+    gtypeOf opts _ _   = pure $ TVariant $ TRowEmpty
+
 instance (GHasType f, G.Selector c) => GHasType (G.S1 c f) where
-    gtypeOf opts = setTag (G.selName m) . gtypeOf opts . fmap G.unM1
+    gtypeOf opts ct = setTag (G.selName m) . gtypeOf opts ct . fmap G.unM1
       where m = (undefined :: t c f a)
-instance GHasType (G.K1 eitherROrP c) where
-    gtypeOf opts _ = pure TChar -- FIXME
--- FIXME flatten record/variant types, e.g. for (a :+: b :+: c), emit {_=a, _=b, _=c}
+
+-- FIXME, this replaces self recursion with recursion in the variable...
+instance HasType c => GHasType (G.K1 t c) where
+    gtypeOf opts ct proxy = typeOfWith opts NoCtx (G.unK1 <$> proxy)
+
 instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where
-    gtypeOf opts proxy = pure $ TVariant (TRowExtend lLabel lType (TRowExtend rLabel rType TRowEmpty))
-      where
-        (Just lLabel, lType) = gtypeOf opts (leftP proxy)
-        (Just rLabel, rType) = gtypeOf opts (rightP proxy)
+  gtypeOf opts ct proxy =
+    case gtypeOf opts NoCtx (leftP proxy) of
+      (Nothing, lType) -> error "GHasType (f G.:+: g): should not happen"
+      (Just lLabel, lType) ->
+        case gtypeOf opts Var (rightP proxy) of
+          (Just rLabel, rType) -> pure $ tag ct (TRowExtend lLabel lType (TRowExtend rLabel rType TRowEmpty))
+          (Nothing, rType) ->     pure $ tag ct (TRowExtend lLabel lType rType)
+    where
+      tag Var = id
+      tag ct  = TVariant
+
 instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
-    gtypeOf opts proxy = pure $ TRecord (TRowExtend lLabel lType (TRowExtend rLabel rType TRowEmpty))
-      where
-        (Just lLabel, lType) = gtypeOf opts (leftP proxy)
-        (Just rLabel, rType) = gtypeOf opts (rightP proxy)
+  gtypeOf opts ct proxy =
+    case gtypeOf opts NoCtx (leftP proxy) of
+      (Nothing, lType) -> error "GHasType (f G.:*: g): should not happen"
+      (Just lLabel, lType) ->
+        case gtypeOf opts (Rec $ succ $ used) (rightP proxy) of
+          (Just rLabel, rType) -> pure $ tag ct (TRowExtend (fl lLabel) lType (TRowExtend (fr rLabel) rType TRowEmpty))
+          (Nothing, rType) ->     pure $ tag ct (TRowExtend (fl lLabel) lType rType)
+    where
+      fl "" = "_" ++ show (used + 1)
+      fl x  = x
+      fr "" = "_" ++ show (used + 2)
+      fr x  = x
+
+      used = case ct of
+        (Rec n) -> n
+        _ -> 0
+      tag Rec{} = id
+      tag ct    = TRecord
+    --
+    -- gtypeOf opts ct proxy = pure $ TRecord (TRowExtend lLabel lType (TRowExtend rLabel rType TRowEmpty))
+    --   where
+    --     lLabel = if lLabel1 == "" then "_1" else lLabel1
+    --     rLabel = if rLabel1 == "" then "_2" else rLabel1
+    --     (Just lLabel1, lType) = gtypeOf opts ct (leftP proxy)
+    --     (Just rLabel1, rType) = gtypeOf opts ct (rightP proxy)
 
 -- genericTypeOf :: G.Generic a => proxy a -> Type
 -- genericTypeOf = undefined
@@ -461,23 +510,30 @@ class FromValue a where
     fromValue :: MonadEval f => Value -> f a
 
 instance HasType Integer where
-    typeOf _ = TInt
+    typeOfWith _ _ _ = pure $ TInt
 instance HasType Double where
-    typeOf _ = TDbl
-instance HasType Bool where
-    typeOf _ = TBool
+    typeOfWith _ _ _ = pure $ TDbl
+-- instance HasType Bool where
+--     typeOfWith _ _ _ = pure $ TBool
 instance HasType Char where
-    typeOf _ = TChar
+    typeOfWith _ _ _ = pure $ TChar
 instance (HasType a, HasType b) => HasType (a -> b) where
-    typeOf p = TFun (typeOf $ dom p) (typeOf $ inside p)
-instance HasType a => HasType (Maybe a) where
-    typeOf p = TMaybe (typeOf $ inside p)
+    typeOfWith opts ct p = TFun <$> (typeOfWith opts ct $ dom p) <*> (typeOfWith opts ct $ inside p)
+instance HasType Void
+instance HasType ()
+instance HasType Bool
+instance HasType Ordering
+instance HasType a => HasType (Maybe a)
+instance (HasType a, HasType b) => HasType (Either a b)
+instance (HasType a, HasType b) => HasType (a, b)
+instance (HasType a, HasType b, HasType c) => HasType (a, b, c)
+-- instance ToValue a => ToValue (Maybe a)
 instance HasType a => HasType [a] where
-    typeOf p = TList (typeOf $ inside p)
-instance HasType Void where
-    typeOf p = TVariant TRowEmpty
-instance HasType () where
-    typeOf p = TRecord TRowEmpty
+    typeOfWith opts ct p = TList <$> typeOfWith opts ct (inside p)
+-- instance HasType Void where
+--     typeOf p = TVariant TRowEmpty
+-- instance HasType () where
+--     typeOf p = TRecord TRowEmpty
 
 
 -- FIXME move
@@ -488,6 +544,11 @@ data Foo a = Leaf a | Node { left :: a, right :: [a] }
   deriving G.Generic
 instance HasType a => HasType (Foo a)
 instance ToValue a => ToValue (Foo a)
+
+data Tree a = TLeaf a | TNode { tleft :: a, tright :: Tree a }
+  deriving G.Generic
+instance HasType a => HasType (Tree a)
+-- instance ToValue a => ToValue (Foo a)
 
 inside :: proxy (f a) -> Proxy a
 inside = const Proxy
