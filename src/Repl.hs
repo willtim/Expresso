@@ -148,8 +148,6 @@ doCommand c = case c of
     , ""
     ]
 
-instance FromValue Value -- FIXME
-
 doEval :: (Value -> IO String) -> ExpI -> Repl ()
 doEval pp e = do
   envs <- lift $ gets stateEnv

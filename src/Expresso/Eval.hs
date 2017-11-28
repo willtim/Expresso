@@ -444,6 +444,16 @@ class HasType a where
     typeOfWith :: Options -> Ctx -> Proxy a -> (Maybe String, Type)
     default typeOfWith :: (G.Generic a, GHasType (G.Rep a)) => Options -> Ctx -> Proxy a -> (Maybe String, Type)
     typeOfWith opts ct = gtypeOf opts ct . fmap G.from
+class GHasType f where
+    gtypeOf :: Options -> Ctx -> Proxy (f x) -> (Maybe String, Type)
+
+-- | Haskell types whose values can be converted to Expresso values.
+class ToValue a where
+    toValue :: a -> Value
+    default toValue :: (G.Generic a, GToValue (G.Rep a)) => a -> Value
+    toValue = gtoValue defaultOptions . G.from
+class GToValue f where
+    gtoValue :: Options -> f x -> Value
 
 -- | This thing is passed around when traversing generic representations of Haskell types to keep track
 -- of the surrounding context. We need this to properly decompose Haskell ADTs with >2 constructors into
@@ -453,10 +463,13 @@ data Ctx = NoCtx | Var | Rec Int
 
 setTag :: b -> (Maybe b, a) -> (Maybe b, a)
 setTag b (_, a) = (Just b, a)
-class GHasType f where
-    gtypeOf :: Options -> Ctx -> Proxy (f x) -> (Maybe String, Type)
+
+
 instance (GHasType f, G.Constructor c) => GHasType (G.M1 G.C c f) where
     gtypeOf opts ct = setTag (G.conName m) . gtypeOf opts ct . fmap G.unM1
+      where m = (undefined :: t c f a)
+instance (GHasType f, G.Selector c) => GHasType (G.S1 c f) where
+    gtypeOf opts ct = setTag (G.selName m) . gtypeOf opts ct . fmap G.unM1
       where m = (undefined :: t c f a)
 instance GHasType f => GHasType (G.D1 c f) where
     gtypeOf opts ct = gtypeOf opts ct . fmap G.unM1
@@ -467,10 +480,6 @@ instance GHasType (G.U1) where
 instance GHasType (G.V1) where
     gtypeOf opts Var _ = pure $ TRowEmpty
     gtypeOf opts _ _   = pure $ TVariant $ TRowEmpty
-
-instance (GHasType f, G.Selector c) => GHasType (G.S1 c f) where
-    gtypeOf opts ct = setTag (G.selName m) . gtypeOf opts ct . fmap G.unM1
-      where m = (undefined :: t c f a)
 
 -- FIXME this allows infinite types to be generated
 -- Can we forbid recursive Haskell types altogether?
@@ -526,17 +535,11 @@ rightP :: forall (q :: (k -> k) -> (k -> k) -> k -> k) f g a . Proxy ((f `q` g) 
 rightP _ = Proxy
 
 
--- | Haskell types whose values can be converted to Expresso values.
-class ToValue a where
-    toValue :: a -> Value
-    default toValue :: (G.Generic a, GToValue (G.Rep a)) => a -> Value
-    toValue = gtoValue defaultOptions . G.from
-class GToValue f where
-    gtoValue :: Options -> f x -> Value
-instance GToValue f => GToValue (G.D1 meta f) where
-instance GToValue f => GToValue (G.C1 meta f) where
-instance GToValue f => GToValue (G.S1 meta f) where
-instance GToValue (G.K1 eitherROrP meta) where
+
+instance GToValue f => GToValue (G.D1 c f) where
+instance GToValue f => GToValue (G.C1 c f) where
+instance GToValue f => GToValue (G.S1 c f) where
+instance GToValue (G.K1 t c) where
 instance (GToValue f, GToValue g) => GToValue (f G.:+: g) where
 instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
 
@@ -549,8 +552,6 @@ instance HasType Integer where
     typeOfWith _ _ _ = pure $ TInt
 instance HasType Double where
     typeOfWith _ _ _ = pure $ TDbl
--- instance HasType Bool where
---     typeOfWith _ _ _ = pure $ TBool
 instance HasType Char where
     typeOfWith _ _ _ = pure $ TChar
 instance (HasType a, HasType b) => HasType (a -> b) where
@@ -582,7 +583,7 @@ instance FromValue a => FromValue (Foo a)
 
 data Tree a = TLeaf a | TNode { tleft :: a, tright :: Tree a }
   deriving G.Generic
-instance (HasType a) => HasType (Tree a)
+-- instance (HasType a) => HasType (Tree a)
 -- instance ToValue a => ToValue (Foo a)
 
 inside :: proxy (f a) -> Proxy a
@@ -602,22 +603,6 @@ instance ToValue Double where
     toValue = VDbl
 instance ToValue Char where
     toValue = VChar
-
--- TODO generic derivation a la GG
-
--- TODO write pure evaluator in ST, carry type in class to get rid of Either/Maybe to get
---    instance (ToValue a, FromValue b) => FromValue (a -> b) where
-instance (ToValue a, FromValue b) => FromValue (a -> Either String b) where
-    fromValue (VLam f) = pure $ \x -> runEvalM' $ do
-      x <- (mkThunk $ pure $ toValue x)
-      r <- f x
-      fromValue r
-    -- fromValue v        = failfromValue "VLam" v
-
-
-
--- instance FromValue Value where
-    -- fromValue v        = return v
 
 instance FromValue Integer where
     fromValue (VInt i) = return i
@@ -646,6 +631,17 @@ instance {-# OVERLAPS #-} FromValue String where
 instance FromValue a => FromValue [a] where
     fromValue (VList xs) = mapM fromValue xs
     fromValue v          = failfromValue "VList" v
+
+-- FIXME carry type in class to make this safe
+instance (ToValue a, FromValue b) => FromValue (a -> b) where
+    fromValue (VLam f) = fmap (fmap $ either (error "unexpected") id) $ pure $ \x -> runEvalM' $ do
+      x <- (mkThunk $ pure $ toValue x)
+      r <- f x
+      fromValue r
+
+-- TODO Questionable...
+instance FromValue Value where
+    fromValue v        = return v
 
 instance {-# OVERLAPS #-} FromValue [Value] where
     fromValue (VList xs)  = return xs
