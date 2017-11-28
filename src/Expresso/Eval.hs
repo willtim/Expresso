@@ -417,6 +417,12 @@ inferTypeWithEnv tEnv tState ei = runExceptT $ do
 inferType :: ExpI -> IO (Either String Scheme)
 inferType = inferTypeWithEnv mempty Infer.initTIState
 
+inferTypeM :: ExpI -> IO (Either String Scheme)
+inferTypeM = inferTypeWithEnv mempty Infer.initTIState
+
+-- data TValue a where
+  -- Value -> Type -> TValue a
+
 -- TODO version of eval that returns a typed expression (using phantoms : monotypes only)
 -- This should allow us to write a safe:
 --

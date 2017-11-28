@@ -72,6 +72,10 @@ data StarHierarchy
 
 data Scheme = Scheme [TyVar] Type
 
+getMonomorphic :: Scheme -> Maybe Type
+getMonomorphic (Scheme [] t) = Just t
+getMonomorphic _ = Nothing
+
 newtype TypeEnv = TypeEnv { unTypeEnv :: M.Map Name Scheme }
     deriving (Monoid)
 
