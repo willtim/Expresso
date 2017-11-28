@@ -137,8 +137,8 @@ mgu (TRecord row1) (TRecord row2) = mgu row1 row2
 mgu (TVariant row1) (TVariant row2) = mgu row1 row2
 mgu TRowEmpty TRowEmpty = return nullSubst
 mgu row1@(TRowExtend label1 fieldTy1 rowTail1) row2@TRowExtend{} = do
+  -- apply side-condition to ensure termination
   (fieldTy2, rowTail2, theta1) <- rewriteRow row2 label1
-  -- ^ apply side-condition to ensure termination
   case snd $ toList rowTail1 of
     Just tv | isInSubst tv theta1 ->
                   throwError $ show (getAnn row1) ++ " : recursive row type"
@@ -209,7 +209,8 @@ rewriteRow (Fix (TRowEmptyF :*: K pos)) newLabel =
   throwError $ show pos ++ " : label " ++ show newLabel ++ " cannot be inserted"
 rewriteRow (Fix (TRowExtendF label fieldTy rowTail :*: K pos)) newLabel
   | newLabel == label     =
-      return (fieldTy, rowTail, nullSubst) -- ^ nothing to do
+      -- nothing to do
+      return (fieldTy, rowTail, nullSubst)
   | TVar alpha <- rowTail = do
       beta  <- newTyVarWith pos (lacks [newLabel]) 'r'
       gamma <- newTyVar pos 'a'
@@ -369,12 +370,12 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
   EmptyAlt               -> do
       b <- newTyVar' 'b'
       return $ TFun (TVariant TRowEmpty) b
-  (VariantInject label)  -> do -- ^ dual of record select
+  (VariantInject label)  -> do -- dual of record select
     a <- newTyVar' 'a'
     r <- newTyVarWith' (lacks [label]) 'r'
     return $ TFun a (TVariant $ TRowExtend label a r)
            -- a -> <l:a|r>
-  (VariantEmbed label)   -> do -- ^ dual of record restrict
+  (VariantEmbed label)   -> do -- dual of record restrict
     a <- newTyVar' 'a'
     r <- newTyVarWith' (lacks [label]) 'r'
     return $ TFun (TVariant r) (TVariant $ TRowExtend label a r)
