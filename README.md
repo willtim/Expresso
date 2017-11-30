@@ -15,13 +15,26 @@ Expresso has the following features:
 - Structural typing with extensible records and variants
 - Lazy evaluation
 - Convenient use from Haskell (a type class for marshalling values)
-- Nix-style lambda syntax
+- Haskell-inspired syntax
 - Built-in support for ints, double, bools, chars, maybes and lists
 
 
 ## Installation
 
 Expresso the library and executable (the REPL) is currently built and tested using cabal.
+
+## Functions
+
+Expresso is a functional language and so lambda terms form our basic building block. To create a named function, we simply bind a lambda using let. I toyed with the idea of using Nix-style lambda syntax, e.g. `x: x` for the identity function, but many mainstream languages, not just Haskell, use an arrow to denote a lambda term. An arrow is also consistent with the notation we use for types.
+Expresso therefore uses the arrow `->` to denote lambdas, with the parameters to bind on the left and the expression body on the right, for example `x -> x` for identity.
+
+Note that multiple juxtaposed arguments is sugar for currying. For example,
+
+    f x -> f x
+
+is the same as:
+
+    f -> x -> f x
 
 
 ## Records
@@ -59,7 +72,7 @@ The row types use lacks constraints to prohibit overlapping field names. For exa
 
 The lacks constraints are shown when printing out inferred row types via the REPL, for example:
 
-    λ> :type r: {x = 1 | r}
+    λ> :type r -> {x = 1 | r}
     forall r1. (r1\x) => {r1} -> {x : Int | r1}
 
 In the above output, the REPL reports that this lambda can take a record with underlying row-type `r1`, providing `r1` satisfies the constraint that it does not have a field `x`.
@@ -71,7 +84,7 @@ The type of a literal record is *closed*, in that the set of fields is fully kno
 
 However, we permit records with redundant fields as arguments to functions, by inferring *open* record types:
 
-    λ> let sqmag = {x, y}: x*x + y*y
+    λ> let sqmag = {x, y} -> x*x + y*y
     λ> :type sqmag
     forall a1 r2. (Num a1, r2\x\y) => {x : a1, y : a1 | r2} -> a1
 
@@ -79,7 +92,7 @@ An open record type is indicated by a row-type in the tail of the record.
 
 Note that the function definition for `sqmag` above makes use of field punning. We could have alternatively written:
 
-    λ> let sqmag = r: r.x*r.x + r.y*r.y
+    λ> let sqmag = r -> r.x*r.x + r.y*r.y
 
 
 ### Record restriction
@@ -98,7 +111,7 @@ We can also use the following syntactic sugar, for such an override:
 Records can be used as a simple module system. For example, imagine a module `"List.x"` with derived operations on lists:
 
     let
-        intercalate = xs: xss: concat (intersperse xs xss);
+        intercalate = xs xss -> concat (intersperse xs xss);
         ...
 
     -- Exports
@@ -152,12 +165,12 @@ Unlike literal records, literal variants are *open*.
 
 Variants are eliminated using the case construct, for example:
 
-    λ> case Foo 1 of { Foo x: x, Bar{x,y}: x+y }
+    λ> case Foo 1 of { Foo x -> x, Bar{x,y} -> x+y }
     1
 
 The above case expression eliminates a *closed* variant, meaning any value other than `Foo` or `Bar` with their expected payloads would lead to a type error. To eliminate an *open* variant, we use a syntax analogous to extension:
 
-    λ> let f = x: case x of { Foo x: x, Bar{x,y}: x+y | otherwise: 42 }
+    λ> let f = x -> case x of { Foo x -> x, Bar{x,y} -> x+y | otherwise -> 42 }
     λ> f (Baz{})
     42
 
@@ -166,17 +179,17 @@ Here the unmatched variant is bound to a variable (i.e. `otherwise`) and can be 
 The dual of record restriction is variant embedding. This allows us to restrict the behaviour exposed by a case expression, by exploiting the non-overlapping field constraints.
 For example, to prevent use of the `Bar` alternative of function `f` above, we can define a new function `g` as follows:
 
-    λ> let g = x: f (<|Bar|> x)
+    λ> let g = x -> f (<|Bar|> x)
     λ> :type g
     forall r1. (r1\Bar\Foo) => <Foo : Int | r1> -> Int
 
 Embedding is used internally to implement overriding alternatives, for example:
 
-    λ> let g = x: case x of { override Foo x: x + 1 | x': f x' }
+    λ> let g = x -> case x of { override Foo x -> x + 1 | x' -> f x' }
 
 is sugar for:
 
-    λ> let g = x: case x of { Foo x: x + 1 | x': f (<|Foo|> x') }
+    λ> let g = x -> case x of { Foo x -> x + 1 | x' -> f (<|Foo|> x') }
 
     λ> :type g
     forall r1 r2. (r1\x\y, r2\Bar\Foo) => <Foo : Int, Bar : {x : Int, y : Int | r1} | r2> -> Int
@@ -195,7 +208,7 @@ Expresso uses lazy evaluation in the hope that it might lead to efficiency gains
 Turing equivalence is introduced via a single `fix` primitive, which can be easily removed or disabled.
 `fix` can be useful to achieve open recursive records and dynamic binding (à la Nix).
 
-        λ> let r = mkOverridable (self: {x = "foo", y = self.x ++ "bar"})
+        λ> let r = mkOverridable (self -> {x = "foo", y = self.x ++ "bar"})
         λ> r
         {override_ = <Lambda>, x = "foo", y = "foobar"}
 

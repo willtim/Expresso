@@ -54,7 +54,7 @@ pLetDecl = (,) <$> pLetBind
 
 pLam     = mkLam
         <$> getPosition
-        <*> try (pBind <* reservedOp ":" <* whiteSpace)
+        <*> try (many1 pBind <* reservedOp "->" <* whiteSpace)
         <*> pExp
         <?> "lambda expression"
 
@@ -254,7 +254,7 @@ mkCaseAlt pos (Extend l altLamE) contE =
 mkCaseAlt pos (Update l altLamE) contE =
     mkApp pos (mkPrim pos $ VariantElim l)
           [ altLamE
-          , mkLam pos (Arg "#r")
+          , mkLam pos [Arg "#r"]
                       (mkApp pos contE [mkEmbed $ withPos pos $ EVar "#r"])
           ]
   where
@@ -270,8 +270,8 @@ mkVariantEmbed pos ls =
   where
     f (pos, l) k = mkApp pos (mkPrim pos $ VariantEmbed l) [k]
 
-mkLam :: Pos -> Bind Name -> ExpI -> ExpI
-mkLam pos b e = withPos pos (ELam b e)
+mkLam :: Pos -> [Bind Name] -> ExpI -> ExpI
+mkLam pos bs e = foldr (\b e -> withPos pos (ELam b e)) e bs
 
 mkVar :: Pos -> Name -> ExpI
 mkVar pos name = withPos pos (EVar name)
@@ -334,7 +334,7 @@ languageDef = emptyDef
     , P.identLetter    = alphaNum <|> oneOf "_'"
     , P.opStart        = P.opLetter languageDef
     , P.opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
-    , P.reservedOpNames= [ "=", ":", "-", "*", "/", "+"
+    , P.reservedOpNames= [ "->", "=", ":", "-", "*", "/", "+" -- NB: keep ":" reserved
                          , "++", "::", "|", ",", ".", "\\"
                          , "{|", "|}", ":=", "{..}"
                          , "==", "/=", ">", ">=", "<", "<="
