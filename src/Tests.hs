@@ -17,6 +17,7 @@ unitTests = testGroup
   , variantTests
   , listTests
   , relationalTests
+  , constraintTests
   ]
 
 letTests = testGroup
@@ -112,6 +113,13 @@ relationalTests = testGroup
   , hasValue "Just 2 >= Just 1" True -- maybe can be compared for ordering
   , hasValue "True&&True"   True
   , hasValue "True||False"  True
+  ]
+
+constraintTests = testGroup
+  "Constraint violations"
+  [ illTyped "show { x = \"test\", y = Just (x -> x) }"
+  , illTyped "{ x = 2 } > { x = 1}"
+  , illTyped "let f = x y -> x + y in f True False"
   ]
 
 hasValue :: (Eq a, Show a, HasValue a) => String -> a -> TestTree

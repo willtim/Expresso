@@ -282,7 +282,8 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
   Char{}                 -> return $ TChar
   String{}               -> return $ TList TChar
   Show                   -> do
-    a <- newTyVar' 'a'
+    -- use an Eq constraint, to prevent attempting to show lambdas
+    a <- newTyVarWith' (Star CEq) 'a'
     return $ TFun a (TList TChar)
   Trace                  -> do
     a <- newTyVar' 'a'
