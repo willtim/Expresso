@@ -246,7 +246,7 @@ ppType TDbl         = "Double"
 ppType TBool        = "Bool"
 ppType TChar        = "Char"
 ppType (TFun t s)   = ppParenType t <+> "->" <+> ppType s
-ppType (TMaybe t)   = "Maybe" <+> ppType t
+ppType (TMaybe t)   = "Maybe" <+> ppParenType t
 ppType (TList a)    = brackets $ ppType a
 ppType (TRecord r)  = braces $ ppRowType r
 ppType (TVariant r) = angles $ ppRowType r
@@ -267,8 +267,9 @@ ppRowType r = sepBy comma (map ppEntry ls)
 ppParenType :: Type -> Doc
 ppParenType t =
   case t of
-    TFun {} -> parens $ ppType t
-    _       -> ppType t
+    TFun{}   -> parens $ ppType t
+    TMaybe{} -> parens $ ppType t
+    _        -> ppType t
 
 -- instance Show Scheme where
 --   showsPrec _ x = shows $ ppScheme x
