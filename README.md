@@ -6,7 +6,7 @@ A simple expressions language with polymorphic extensible row types.
 ## Introduction
 
 Expresso is a minimal statically-typed functional programming language, designed with embedding and/or extensibility in mind.
-Possible use cases for such a minimal language include configuration (à la Nix) or as a starting point for a custom external DSL.
+Possible use cases for such a minimal language include configuration (à la Nix), data exchange (à la JSON) or even a starting point for a custom external DSL.
 
 Expresso has the following features:
 
@@ -75,7 +75,7 @@ The lacks constraints are shown when printing out inferred row types via the REP
     λ> :type r -> {x = 1 | r}
     forall r. (r\x) => {r} -> {x : Int | r}
 
-In the above output, the REPL reports that this lambda can take a record with underlying row-type `r1`, providing `r1` satisfies the constraint that it does not have a field `x`.
+In the above output, the REPL reports that this lambda can take a record with underlying row-type `r`, providing `r` satisfies the constraint that it does not have a field `x`.
 
 The type of a literal record is *closed*, in that the set of fields is fully known:
 
@@ -193,6 +193,25 @@ is sugar for:
 
     λ> :type g
     forall r1 r2. (r1\x\y, r2\Bar\Foo) => <Foo : Int, Bar : {x : Int, y : Int | r1} | r2> -> Int
+
+
+## Equality
+
+All data types and data structures can be compared for equality. Only function values do not satisfy the equality constraint.
+
+    λ> :type x y -> x == y
+    forall a. (Eq a) => a -> a -> Bool
+
+If we wanted to use Expresso as a lightweight data-exchange format (i.e. JSON with types), we could use the equality constraint to guarantee the absence of partially-applied functions in any of our structures.
+
+The "show" primitive has such an equality constraint, for example:
+
+    λ> :type show
+    forall a. (Eq a) => a -> [Char]
+    λ> show { x = "test" }
+    "{x = \"test\"}"
+    λ> show { x = "test", y = Just (x -> x) }
+    "<interactive>" (line 1, column 8) : cannot unify {x : [Char], y : Maybe (a -> a)} with constraint Eq
 
 
 ## Lazy evaluation
