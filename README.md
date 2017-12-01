@@ -25,10 +25,10 @@ Expresso the library and executable (the REPL) is currently built and tested usi
 
 ## Functions
 
-Expresso is a functional language and so lambda terms form our basic building block. To create a named function, we simply bind a lambda using let. I toyed with the idea of using Nix-style lambda syntax, e.g. `x: x` for the identity function, but many mainstream languages, not just Haskell, use an arrow to denote a lambda term. An arrow is also consistent with the notation we use for types.
+Expresso is a functional language and so we use lambda terms as our basic means of abstraction. To create a named function, we simply bind a lambda using let. I toyed with the idea of using Nix-style lambda syntax, e.g. `x: x` for the identity function, but many mainstream languages, not just Haskell, use an arrow to denote a lambda term. An arrow is also consistent with the notation we use for types.
 Expresso therefore uses the arrow `->` to denote lambdas, with the parameters to bind on the left and the expression body on the right, for example `x -> x` for identity.
 
-Note that multiple juxtaposed arguments is sugar for currying. For example,
+Note that multiple juxtaposed arguments is sugar for currying. For example:
 
     f x -> f x
 
@@ -73,7 +73,7 @@ The row types use lacks constraints to prohibit overlapping field names. For exa
 The lacks constraints are shown when printing out inferred row types via the REPL, for example:
 
     λ> :type r -> {x = 1 | r}
-    forall r1. (r1\x) => {r1} -> {x : Int | r1}
+    forall r. (r\x) => {r} -> {x : Int | r}
 
 In the above output, the REPL reports that this lambda can take a record with underlying row-type `r1`, providing `r1` satisfies the constraint that it does not have a field `x`.
 
@@ -86,7 +86,7 @@ However, we permit records with redundant fields as arguments to functions, by i
 
     λ> let sqmag = {x, y} -> x*x + y*y
     λ> :type sqmag
-    forall a1 r2. (Num a1, r2\x\y) => {x : a1, y : a1 | r2} -> a1
+    forall a r. (Num a, r\x\y) => {x : a, y : a | r} -> a
 
 An open record type is indicated by a row-type in the tail of the record.
 
@@ -123,7 +123,7 @@ Such a module can be imported using a `let` declaration:
 
     λ> let list = import "List.x"
     λ> :type list.intercalate
-    forall a1. [a1] -> [[a1]] -> [a1]
+    forall a. [a] -> [[a]] -> [a]
 
 Or simply:
 
@@ -136,7 +136,7 @@ The biggest limitation is that records with polymorphic functions cannot be pass
 
 To encode concatenation, we can use functions that extend records and compose them using straightforward function composition:
 
-    let f = (r:{ x = "foo", y = True |r}) >> (r:{ z = "bar" |r})
+    let f = (r -> { x = "foo", y = True | r}) >> (r -> { z = "bar" | r})
 
 Expresso has a special syntax for such "difference records":
 
@@ -161,7 +161,7 @@ Variants are introduced via injection (the dual of record selection), for exampl
 Unlike literal records, literal variants are *open*.
 
     λ> :type Foo 1
-    forall r1. (r1\Foo) => <Foo : Int | r1>
+    forall r. (r\Foo) => <Foo : Int | r>
 
 Variants are eliminated using the case construct, for example:
 
@@ -181,7 +181,7 @@ For example, to prevent use of the `Bar` alternative of function `f` above, we c
 
     λ> let g = x -> f (<|Bar|> x)
     λ> :type g
-    forall r1. (r1\Bar\Foo) => <Foo : Int | r1> -> Int
+    forall r. (r\Bar\Foo) => <Foo : Int | r> -> Int
 
 Embedding is used internally to implement overriding alternatives, for example:
 
