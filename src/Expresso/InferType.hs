@@ -103,13 +103,13 @@ newTyVarWith' c prefix = do
   s <- get
   let i = tiSupply s
   put s {tiSupply = i + 1 }
-  return (TVar $ TyVar [prefix] i c)
+  return (TVar $ TyVar (prefix:show i) i prefix c)
 
 -- | The instantiation function replaces all bound type variables in a
 -- type scheme with fresh type variables.
 instantiate :: Pos -> Scheme -> TI Type
 instantiate pos (Scheme vars t) = do
-  nvars <- mapM (\(TyVar (p:_) _ c) -> newTyVarWith pos c p) vars
+  nvars <- mapM (\(TyVar _ _ p c) -> newTyVarWith pos c p) vars
   let s = mconcat $ zipWith (|->) vars nvars
   return $ apply s t
 

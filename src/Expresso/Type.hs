@@ -52,6 +52,7 @@ data TypeF r
 data TyVar = TyVar
   { tyvarName       :: Name
   , tyvarUnique     :: Int
+  , tyvarPrefix     :: Char -- used to generate names
   , tyvarConstraint :: Constraint
   } deriving (Eq, Ord, Show)
 
@@ -237,7 +238,7 @@ unionConstraints c1 c2  = error $ "unionConstraints: kind mismatch: " ++ show (c
 -- Pretty-printing
 
 ppType :: Type -> Doc
-ppType (TVar v)     = text $ tyvarName v <> show (tyvarUnique v)
+ppType (TVar v)     = text $ tyvarName v
 ppType TInt         = "Int"
 ppType TDbl         = "Double"
 ppType TBool        = "Bool"
@@ -289,13 +290,22 @@ ppScheme (rename -> Scheme vars t)
         Star COrd -> ["Ord" <+> ppType (TVar v)]
         Star CNum -> ["Num" <+> ppType (TVar v)]
 
--- | alpha rename of type vars
+-- | rename type vars for pretty-printing
 rename :: Scheme -> Scheme
 rename (Scheme vars t) = Scheme vars' t'
   where
-    vars' = zipWith renameTyVar vars [1..]
+    -- group by prefix and number sequentially each prefix
+    vars' = concat
+          . M.elems
+          . M.map renameTyVars
+          . M.fromListWith (++)
+          . map (tyvarPrefix &&& (:[]))
+          $ vars
 
-    renameTyVar (TyVar n _ c) i = TyVar n i c
+    renameTyVars [TyVar _ u p c] = [TyVar [p] u p c] -- drop number suffix when one instance of a prefix
+    renameTyVars vs = zipWith renameTyVar vs [(1::Integer)..]
+      where
+        renameTyVar (TyVar _ u p c) n = TyVar (p:show n) u p c
 
     m = IM.fromList $ zip (map tyvarUnique vars) vars'
     t' = cata alg t where
