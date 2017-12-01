@@ -84,10 +84,10 @@ ppValue (VInt  i)   = integer i
 ppValue (VDbl  d)   = double d
 ppValue (VBool b)   = if b then "True" else "False"
 ppValue (VChar c)   = text $ c : []
-ppValue (VString s) = dquotes $ text s
 ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppValue v) mx
+ppValue (VString s) = string (show s)
 ppValue (VList xs)
-    | Just str <- mapM extractChar xs = dquotes $ text str
+    | Just str <- mapM extractChar xs = string $ show str
     | otherwise     = bracketsList $ map ppValue xs
 ppValue (VRecord m) = bracesList $ map ppEntry $ HashMap.keys m
   where
