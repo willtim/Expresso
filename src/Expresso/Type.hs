@@ -222,15 +222,17 @@ satisfies t c =
     inferFromRow TVar{}    = Nothing
     inferFromRow TRowEmpty = Nothing
     inferFromRow (TRowExtend _ t r)
-        | Just c <- inferFromRow r = Just $ infer t `unionConstraints` c
+        | Just (Star c1) <- inferFromRow r
+        , Star c2 <- infer t = Just $ Star (min c1 c2)
         | otherwise = Just $ infer t
     inferFromRow t = error $ "satisfies/inferFromRow: unexpected type: " ++ show t
 
+-- | unions constraints
+-- for kind Star: picks the most specific, i.e. max c1 c2
+-- for kind Row: unions the sets of lacks labels
 unionConstraints :: Constraint -> Constraint -> Constraint
-unionConstraints (Row s1)  (Row s2) = Row $ s1 `S.union` s2
-unionConstraints (Star c1) (Star c2)
-    | c1 > c2   = Star c1 -- pick the most specific
-    | otherwise = Star c2
+unionConstraints (Row s1)  (Row s2)  = Row  $ s1 `S.union` s2
+unionConstraints (Star c1) (Star c2) = Star $ max c1 c2
 unionConstraints c1 c2  = error $ "unionConstraints: kind mismatch: " ++ show (c1, c2)
 
 
