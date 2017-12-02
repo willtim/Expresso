@@ -368,7 +368,7 @@ tiPrim pos prim = fmap (annotate pos) $ case prim of
     a <- newTyVar' 'a'
     r <- newTyVarWith' (lacks [label]) 'r'
     return $ TFun (TRecord $ TRowExtend label a r) (TRecord r)
-  EmptyAlt               -> do
+  Absurd                 -> do
       a <- newTyVar' 'a'
       return $ TFun (TVariant TRowEmpty) a
   (VariantInject label)  -> do -- dual of record select

@@ -134,7 +134,7 @@ pPrimFun = msum
   , fun "ceiling" Ceiling
   , fun "abs"     Abs
   , fun "mod"     Mod
-  , fun "absurd"  EmptyAlt
+  , fun "absurd"  Absurd
   ]
   where
     fun sym prim = reserved sym *> ((\pos -> mkPrim pos prim) <$> getPosition)
@@ -216,7 +216,7 @@ pCaseBody = mkCaseAlt <$> getPosition <*> pCaseAlt <*> pRest
   where
     pRest = (comma          *> pCaseBody)   <|>
             (reservedOp "|" *> pExp)        <|>
-            (\pos -> mkPrim pos EmptyAlt) <$> getPosition
+            (\pos -> mkPrim pos Absurd) <$> getPosition
 
 pCaseAlt =
     (try (Extend <$> pVariantLabel
