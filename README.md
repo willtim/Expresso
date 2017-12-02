@@ -36,6 +36,8 @@ is the same as:
 
     f -> x -> f x
 
+The function composition operators are `>>` and `<<` for forwards and backwards composition respectively.
+
 
 ## Records
 
@@ -94,7 +96,6 @@ Note that the function definition for `sqmag` above makes use of field punning. 
 
     λ> let sqmag = r -> r.x*r.x + r.y*r.y
 
-
 ### Record restriction
 
 We can remove a field by using the restriction primitive `\`. For example, the following will type-check:
@@ -104,7 +105,6 @@ We can remove a field by using the restriction primitive `\`. For example, the f
 We can also use the following syntactic sugar, for such an override:
 
     {x := 1 | {x = 1}}
-
 
 ### Records as modules
 
@@ -131,7 +131,6 @@ Or simply:
 
 The biggest limitation is that records with polymorphic functions cannot be passed as lambda arguments without Rank2 polymorphism. Records must also not refer to themselves, as Expresso does not support type-level recursion.
 
-
 ### Difference records and concatenation
 
 To encode concatenation, we can use functions that extend records and compose them using straightforward function composition:
@@ -148,6 +147,13 @@ Concatenation is asymmetric whenever we use overrides, for example:
 
      {| x = "foo" |} >> {| x := "bar" |} -- Type checks
      {| x = "foo" |} << {| x := "bar" |} -- DOES NOT TYPE CHECK!
+
+### The Unit type
+
+The type `{}` is an example of a *Unit* type. It has only one inhabitant, the empty record `{}`:
+
+    λ> :type {}
+    {}
 
 
 ## Variants
@@ -174,7 +180,9 @@ The above case expression eliminates a *closed* variant, meaning any value other
     λ> f (Baz{})
     42
 
-Here the unmatched variant is bound to a variable (i.e. `otherwise`) and can be either ignored or delegated to another function.
+Here the unmatched variant is passed to a lambda (with `otherwise` as the parameter). The expression after the bar `|` typically either ignores the variant or delegates it to another function.
+
+### Variant embedding
 
 The dual of record restriction is variant embedding. This allows us to restrict the behaviour exposed by a case expression, by exploiting the non-overlapping field constraints.
 For example, to prevent use of the `Bar` alternative of function `f` above, we can define a new function `g` as follows:
@@ -185,14 +193,31 @@ For example, to prevent use of the `Bar` alternative of function `f` above, we c
 
 Embedding is used internally to implement overriding alternatives, for example:
 
-    λ> let g = x -> case x of { override Foo x -> x + 1 | x' -> f x' }
+    λ> let g = x -> case x of { override Foo x -> x + 1 | f }
 
 is sugar for:
 
-    λ> let g = x -> case x of { Foo x -> x + 1 | x' -> f (<|Foo|> x') }
+    λ> let g = x -> case x of { Foo x -> x + 1 | <|Foo|> >> f }
 
     λ> :type g
     forall r1 r2. (r1\x\y, r2\Bar\Foo) => <Foo : Int, Bar : {x : Int, y : Int | r1} | r2> -> Int
+
+### The Void type
+
+Internally, the syntax to eliminate a closed variant uses the empty variant type `<>`, also known as *Void*. The Void type has no inhabitants, but we can use it to define a function `absurd`:
+
+    λ> :type absurd
+    forall a. <> -> a
+
+Absurd is an example of *Ex Falso Quodlibet* from classical logic (anything can be proven using a contradiction as a premise).
+
+As an example of the above, the following closed case expression:
+
+    case x of { Foo{} -> 1, Bar{} -> 2 }
+
+is actually sugar for:
+
+    case x of { Foo{} -> 1 | x' -> case x' of { Bar{} -> 2 | absurd } }
 
 
 ## Equality
@@ -227,9 +252,9 @@ Expresso uses lazy evaluation in the hope that it might lead to efficiency gains
 Turing equivalence is introduced via a single `fix` primitive, which can be easily removed or disabled.
 `fix` can be useful to achieve open recursive records and dynamic binding (à la Nix).
 
-        λ> let r = mkOverridable (self -> {x = "foo", y = self.x ++ "bar"})
-        λ> r
-        {override_ = <Lambda>, x = "foo", y = "foobar"}
+    λ> let r = mkOverridable (self -> {x = "foo", y = self.x ++ "bar"})
+    λ> r
+    {override_ = <Lambda>, x = "foo", y = "foobar"}
 
-        λ> override r {| x := "baz" |}
-        {override_ = <Lambda>, x = "baz", y = "bazbar"}
+    λ> override r {| x := "baz" |}
+    {override_ = <Lambda>, x = "baz", y = "bazbar"}
