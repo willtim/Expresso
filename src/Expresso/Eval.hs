@@ -259,6 +259,7 @@ evalPrim pos p = case p of
                           | otherwise -> evalApp pos k (Thunk $ return s)
             v -> throwError $ show pos ++ " : Expected a variant, but got: " ++
                               show (ppValue v)
+    EmptyAlt -> VLam $ const $ throwError "The impossible happened!"
     p -> error $ show pos ++ " : Unsupported Prim: " ++ show p
 
 
