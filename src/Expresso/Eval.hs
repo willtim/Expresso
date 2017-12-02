@@ -364,79 +364,83 @@ recordValues = List.sortBy (comparing fst) . HashMap.toList
 ------------------------------------------------------------
 -- HasValue class and instances
 
-class Inject a where
-    inj :: a -> Value
-instance Inject Integer where
-    inj = VInt
-instance Inject Double where
-    inj = VDbl
-instance Inject Char where
-    inj = VChar
-
 -- TODO generic derivation a la GG
 
 -- TODO write pure evaluator in ST, carry type in class to get rid of Either/Maybe to get
---    instance (Inject a, HasValue b) => HasValue (a -> b) where
-instance (Inject a, HasValue b) => HasValue (a -> EvalM b) where
-    proj (VLam f) = pure $ \x -> do
-      x <- (mkThunk $ pure $ inj x)
-      r <- f x
+--    instance (HasValue b) => HasValue (a -> b) where
+instance (HasValue a, HasValue b) => HasValue (a -> EvalM b) where
+    proj (VLam f) = return $ \x -> do
+      r <- f (Thunk $ return $ inj x)
       proj r
     proj v        = failProj "VLam" v
-
+    inj f         = VLam $ \v -> proj' v >>= fmap inj . f
 
 class HasValue a where
     proj :: Value -> EvalM a
+    inj  :: a -> Value
 
 instance HasValue Value where
     proj v        = return v
+    inj           = id
 
 instance HasValue Integer where
     proj (VInt i) = return i
     proj v        = failProj "VInt" v
+    inj           = VInt
 
 instance HasValue Double where
     proj (VDbl d) = return d
     proj v        = failProj "VDbl" v
+    inj           = VDbl
 
 instance HasValue Bool where
     proj (VBool b) = return b
     proj v         = failProj "VBool" v
+    inj            = VBool
 
 instance HasValue Char where
     proj (VChar c) = return c
     proj v         = failProj "VChar" v
+    inj            = VChar
 
 instance HasValue a => HasValue (Maybe a) where
     proj (VMaybe m) = mapM proj m
     proj v          = failProj "VMaybe" v
+    inj             = VMaybe . fmap inj
 
 instance {-# OVERLAPS #-} HasValue String where
     proj (VString s) = return s
     proj v           = failProj "VString" v
+    inj              = VString
 
 instance HasValue a => HasValue [a] where
     proj (VList xs) = mapM proj xs
     proj v          = failProj "VList" v
+    inj             = VList . map inj
 
 instance {-# OVERLAPS #-} HasValue [Value] where
     proj (VList xs)  = return xs
     proj (VString s) = return $ map VChar s
     proj v           = failProj "VList" v
+    inj              = VList
 
 instance HasValue a => HasValue (HashMap Name a) where
     proj (VRecord m) = mapM proj' m
     proj v           = failProj "VRecord" v
+    inj              = VRecord . fmap (Thunk . return . inj)
 
 instance {-# OVERLAPS #-} HasValue a => HasValue [(Name, a)] where
-    proj v             = HashMap.toList <$> proj v
+    proj v           = HashMap.toList <$> proj v
+    inj              = inj . HashMap.fromList
 
 instance {-# OVERLAPS #-} HasValue (HashMap Name Thunk) where
     proj (VRecord m) = return m
     proj v           = failProj "VRecord" v
+    inj              = VRecord
 
 instance {-# OVERLAPS #-} HasValue [(Name, Thunk)] where
     proj v           = HashMap.toList <$> proj v
+    inj              = inj . HashMap.fromList
 
 failProj :: String -> Value -> EvalM a
 failProj desc v = throwError $ "Expected a " ++ desc ++
