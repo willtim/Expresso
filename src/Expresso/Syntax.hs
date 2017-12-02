@@ -72,7 +72,7 @@ data Prim
   | RecordSelect Label
   | RecordExtend Label
   | RecordRestrict Label
-  | EmptyAlt
+  | Absurd
   | VariantInject Label
   | VariantEmbed Label
   | VariantElim Label

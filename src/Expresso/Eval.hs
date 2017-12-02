@@ -147,7 +147,7 @@ evalPrim pos p = case p of
     -- Trace
     ErrorPrim     -> VLam $ \s -> do
         msg <- proj' s
-        throwError $ "error (" ++ show pos ++ "):" ++ msg
+        throwError $ "error (" ++ show pos ++ "): " ++ msg
 
     ArithPrim Add -> mkStrictLam2 $ numOp pos (+)
     ArithPrim Sub -> mkStrictLam2 $ numOp pos (-)
@@ -259,7 +259,7 @@ evalPrim pos p = case p of
                           | otherwise -> evalApp pos k (Thunk $ return s)
             v -> throwError $ show pos ++ " : Expected a variant, but got: " ++
                               show (ppValue v)
-    EmptyAlt -> VLam $ const $ throwError "The impossible happened!"
+    Absurd -> VLam $ \v -> force v >> throwError "The impossible happened!"
     p -> error $ show pos ++ " : Unsupported Prim: " ++ show p
 
 
