@@ -84,7 +84,7 @@ ppValue (VInt  i)   = integer i
 ppValue (VDbl  d)   = double d
 ppValue (VBool b)   = if b then "True" else "False"
 ppValue (VChar c)   = text $ c : []
-ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppValue v) mx
+ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppParensValue v) mx
 ppValue (VString s) = string (show s)
 ppValue (VList xs)
     | Just str <- mapM extractChar xs = string $ show str
@@ -94,14 +94,28 @@ ppValue (VRecord m) = bracesList $ map ppEntry $ HashMap.keys m
     ppEntry l = text l <+> "=" <+> "<Thunk>"
 ppValue (VVariant l _) = text l <+> "<Thunk>"
 
+ppParensValue :: Value -> Doc
+ppParensValue v =
+    case v of
+        VMaybe{}   -> parens $ ppValue v
+        VVariant{} -> parens $ ppValue v
+        _          -> ppValue v
+
 -- | This evaluates deeply
 ppValue' :: Value -> EvalM Doc
 ppValue' (VRecord m) = (bracesList . map ppEntry . HashMap.toList)
                            <$> mapM (force >=> ppValue') m
   where
     ppEntry (l, v) = text l <+> text "=" <+> v
-ppValue' (VVariant l t) = (text l <+>) <$> (force >=> ppValue') t
+ppValue' (VVariant l t) = (text l <+>) <$> (force >=> ppParensValue') t
 ppValue' v = return $ ppValue v
+
+ppParensValue' :: Value -> EvalM Doc
+ppParensValue' v =
+    case v of
+        VMaybe{}   -> parens <$> ppValue' v
+        VVariant{} -> parens <$> ppValue' v
+        _          -> ppValue' v
 
 extractChar :: Value -> Maybe Char
 extractChar (VChar c) = Just c
