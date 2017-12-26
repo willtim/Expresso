@@ -9,7 +9,7 @@ module Expresso
   ( module Expresso.Syntax
   , module Expresso.Eval
   , module Expresso.Type
-  , module Expresso.InferType
+  , module Expresso.TypeCheck
   , bind
   , eval
   , evalFile
@@ -27,25 +27,25 @@ import Control.Monad ((>=>))
 import Control.Monad.Except (ExceptT(..), runExceptT, throwError)
 
 import Expresso.Eval (Env, EvalM, HasValue(..), Value(..), runEvalM)
-import Expresso.InferType (TIState, initTIState)
+import Expresso.TypeCheck (TIState, initTIState)
 import Expresso.Pretty (render)
 import Expresso.Syntax
 import Expresso.Type
 import Expresso.Utils
 import qualified Expresso.Eval as Eval
-import qualified Expresso.InferType as InferType
+import qualified Expresso.TypeCheck as TypeCheck
 import qualified Expresso.Parser as Parser
 
 
-typeOfWithEnv :: TypeEnv -> TIState -> ExpI -> IO (Either String Scheme)
+typeOfWithEnv :: TypeEnv -> TIState -> ExpI -> IO (Either String Type)
 typeOfWithEnv tEnv tState ei = runExceptT $ do
     e <- Parser.resolveImports ei
     ExceptT $ return $ inferTypes tEnv tState e
 
-typeOf :: ExpI -> IO (Either String Scheme)
+typeOf :: ExpI -> IO (Either String Type)
 typeOf = typeOfWithEnv mempty initTIState
 
-typeOfString :: String -> IO (Either String Scheme)
+typeOfString :: String -> IO (Either String Type)
 typeOfString str = runExceptT $ do
     top <- ExceptT $ return $ Parser.parse "<unknown>" str
     ExceptT $ typeOf top
@@ -56,8 +56,8 @@ evalWithEnv
     -> ExpI
     -> IO (Either String a)
 evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
-  e    <- Parser.resolveImports ei
-  _sch <- ExceptT . return $ inferTypes tEnv tState e
+  e      <- Parser.resolveImports ei
+  _sigma <- ExceptT . return $ inferTypes tEnv tState e
   ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e
 
 eval :: HasValue a => ExpI -> IO (Either String a)
@@ -82,7 +82,7 @@ bind
 bind (tEnv, tState, env) b ei = do
     e     <- Parser.resolveImports ei
     let (res'e, tState') =
-            InferType.runTI (InferType.tiDecl (getAnn ei) b e) tEnv tState
+            TypeCheck.runTI (TypeCheck.tcDecl (getAnn ei) b e) tEnv tState
     case res'e of
         Left err    -> throwError err
         Right tEnv' -> do
@@ -90,12 +90,12 @@ bind (tEnv, tState, env) b ei = do
             env'  <- Eval.bind env b thunk
             return (tEnv', tState', env')
 
-inferTypes :: TypeEnv -> TIState -> Exp -> Either String Scheme
+inferTypes :: TypeEnv -> TIState -> Exp -> Either String Type
 inferTypes tEnv tState e =
-    fst $ InferType.runTI (InferType.typeInference e) tEnv tState
+    fst $ TypeCheck.runTI (TypeCheck.typeCheck e) tEnv tState
 
-showType :: Scheme -> String
-showType = render . ppScheme
+showType :: Type -> String
+showType = render . ppType
 
 -- | This does *not* evaluate deeply
 showValue :: Value -> String

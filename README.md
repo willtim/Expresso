@@ -11,13 +11,13 @@ Possible use cases for such a minimal language include configuration (à la Nix)
 Expresso has the following features:
 
 - A small and simple implementation
-- Statically typed with full type inference
+- Statically typed with type inference
 - Structural typing with extensible records and variants
 - Lazy evaluation
 - Convenient use from Haskell (a type class for marshalling values)
 - Haskell-inspired syntax
+- Type annotations to support first-class modules and schema validation use cases
 - Built-in support for ints, double, bools, chars, maybes and lists
-
 
 ## Installation
 
@@ -55,6 +55,7 @@ Records can of course contain arbitrary types and be arbitrarily nested. They ca
     λ> {x = 1, y = True} == {y = True, x = 1}
     True
 
+Note that records cannot refer to themselves, as Expresso does not support type-level recursion.
 
 ### Record extension
 
@@ -106,16 +107,18 @@ We can also use the following syntactic sugar, for such an override:
 
     {x := 1 | {x = 1}}
 
-### Records as modules
+### First-class modules
 
-Records can be used as a simple module system. For example, imagine a module `"List.x"` with derived operations on lists:
+Records can be used as a simple but powerful module system. For example, imagine a module `"List.x"` with derived operations on lists:
 
     let
+        reverse     = foldl (xs x -> x :: xs) [];
         intercalate = xs xss -> concat (intersperse xs xss);
         ...
 
     -- Exports
-    in { intercalate
+    in { reverse
+       , intercalate
        , ...
        }
 
@@ -129,7 +132,25 @@ Or simply:
 
     λ> let {..} = import "List.x"
 
-The biggest limitation is that records with polymorphic functions cannot be passed as lambda arguments without Rank2 polymorphism. Records must also not refer to themselves, as Expresso does not support type-level recursion.
+Records with polymorphic functions can be passed as lambda arguments and remain polymorphic using *higher-rank polymorphism*. To accomplish this, we must provide Expresso with a suitable type annotation of the argument. For example:
+
+    let f = (m : forall a. { reverse : [a] -> [a] |_}) ->
+                {l = m.reverse [True, False], r = m.reverse "abc" }
+
+The function `f` above takes a "module" `m` containing a polymorphic function `reverse`. We annotate `m` with a type by using a single colon `:` followed by the type we are expecting.
+Note the underscore `_` in the tail of the record. This is a *type wildcard*, meaning we have specified a *partial type signature*. This type wildcard allows us to pass an arbitrary module containing a `reverse` function with this signature. To see the full type signature of `f`, we can use the Expresso REPL:
+
+    λ> :t f
+    forall r. (r\reverse) => (forall a. {reverse : [a] -> [a] | r}) ->
+        {l : [Bool], r : [Char]}
+
+Note that the `r`, representing the rest of the module fields, is a top-level quantifier. The type wildcard is especially useful here, as it allows us to avoid creating a top-level signature for the entire function and explicitly naming this row variable. More generally, type wildcards allow us to leave parts of a type signature unspecified.
+
+Function `f` can now of course be applied to any module satisfying the type signature:
+
+    λ> f (import "Prelude.x")
+    {l = [False, True], r = "cba"}
+
 
 ### Difference records and concatenation
 
@@ -220,23 +241,32 @@ is actually sugar for:
     case x of { Foo{} -> 1 | x' -> case x' of { Bar{} -> 2 | absurd } }
 
 
-## Equality
+## A data-exchange format with schemas
 
-All data types and data structures can be compared for equality. Only function values do not satisfy the equality constraint.
+We could use Expresso as a lightweight data-exchange format (i.e. JSON with types). But how might be validate terms against a schema?
 
-    λ> :type x y -> x == y
-    forall a. (Eq a) => a -> a -> Bool
+A simple type annotation `<term> : <type>` , will not suffice for "schema validation". For example, consider this attempt at validating an integer against a schema that permits everything:
 
-If we wanted to use Expresso as a lightweight data-exchange format (i.e. JSON with types), we could use the equality constraint to guarantee the absence of partially-applied functions in any of our structures.
+    1 : forall a. a        -- FAILS
 
-The "show" primitive has such an equality constraint, for example:
+The above fails to type check since the left-hand-side is inferred as the most general type (here a concrete int) and the right-hand-side must be less so.
 
-    λ> :type show
-    forall a. (Eq a) => a -> [Char]
-    λ> show { x = "test" }
-    "{x = \"test\"}"
-    λ> show { x = "test", y = Just (x -> x) }
-    "<interactive>" (line 1, column 8) : cannot unify {x : [Char], y : Maybe (a -> a)} with constraint Eq
+Instead we need something like this:
+
+    (id : forall a. a -> a) 1
+
+A nice syntactic sugar for this is a *signature section*, although the version in Expresso is slightly different from the Haskell proposal. We write `(:T)` to mean `id : T -> T`, where any quantifiers are kept at the top-level. We can now use:
+
+    (: forall a. a) 1
+
+If we really do have places in our schema where we want to permit arbitrary data, we should use the equality constraint to guarantee the absence of partially-applied functions. For example:
+
+    (: forall a. Eq a => { x : <Foo : Int, Bar : a> }) { x = Bar id }
+
+would fail to type check. But the following succeeds:
+
+    λ> (: forall a. Eq a => { x : <Foo : Int, Bar : a> }) { x = Bar "abc" }
+    {x = Bar "abc"}
 
 
 ## Lazy evaluation

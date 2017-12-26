@@ -17,7 +17,7 @@ Library
   Other-Modules:   Expresso.Parser
                    Expresso.Eval
                    Expresso.Type
-                   Expresso.InferType
+                   Expresso.TypeCheck
                    Expresso.Syntax
                    Expresso.Pretty
                    Expresso.Utils
@@ -35,7 +35,7 @@ Executable expresso
   Other-Modules:   Expresso.Parser
                    Expresso.Eval
                    Expresso.Type
-                   Expresso.InferType
+                   Expresso.TypeCheck
                    Expresso.Syntax
                    Expresso.Pretty
                    Expresso.Utils
