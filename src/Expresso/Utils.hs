@@ -85,7 +85,7 @@ instance (Functor f, Ord (f (Fix f))) => Ord (Fix f) where
 
 class View f a where
   proj :: a -> f a
-  toValue  :: f a -> a
+  inj  :: f a -> a
 
 showError :: Show a => Either a b -> Either String b
 showError = either (Left . show) Right

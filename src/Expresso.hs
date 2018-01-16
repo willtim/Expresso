@@ -27,7 +27,7 @@ import Control.Monad ((>=>))
 import Control.Monad.Except (ExceptT(..), runExceptT, throwError)
 
 import Expresso.Eval (Env, EvalM, FromValue(..), Value(..), runEvalM)
-import Expresso.InferType (TIState, initTIState)
+import Expresso.TypeCheck (TIState, initTIState)
 import Expresso.Pretty (render)
 import Expresso.Syntax
 import Expresso.Type
@@ -63,7 +63,7 @@ evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
 {- ======= -}
   e      <- Parser.resolveImports ei
   _sigma <- ExceptT . return $ inferTypes tEnv tState e
-  ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e
+  ExceptT $ runEvalM . (Eval.eval env >=> Eval.fromValue) $ e
 {- >>>>>>> tim/master -}
 
 eval :: FromValue a => ExpI -> IO (Either String a)

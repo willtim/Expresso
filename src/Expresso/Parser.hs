@@ -288,7 +288,7 @@ mkCaseAlt pos (Update l altLamE) contE =
     mkEmbed e = mkApp pos (mkPrim pos $ VariantEmbed l) [e]
 
 mkVariant :: Pos -> Label -> ExpI
-mkVariant pos l = mkPrim pos $ VarianttoValueect l
+mkVariant pos l = mkPrim pos $ VariantInject l
 
 mkVariantEmbed :: Pos -> [(Pos , Label)] -> ExpI
 mkVariantEmbed pos ls =

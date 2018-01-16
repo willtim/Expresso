@@ -65,7 +65,7 @@ import Expresso.Syntax
 import Expresso.Type
 import Expresso.Pretty
 import Expresso.Utils (cata, (:*:)(..), K(..))
-import qualified Expresso.InferType as Infer
+{- import qualified Expresso.InferType as Infer -}
 import qualified Expresso.Parser as Parser
 
 import Debug.Trace
@@ -315,7 +315,7 @@ evalPrim pos p = case p of
         let err = throwError $ show pos ++ " : " ++ l ++ " not found"
         maybe err force (HashMap.lookup l r')
     RecordEmpty -> VRecord mempty
-    VarianttoValueect l  -> VLam $ \v ->
+    VariantInject l  -> VLam $ \v ->
         return $ VVariant l v
     VariantEmbed _   -> VLam force
     VariantElim l    -> mkStrictLam $ \f -> return $ mkStrictLam2 $ \k s -> do
@@ -439,23 +439,13 @@ recordValues :: HashMap Label a -> [(Label, a)]
 recordValues = List.sortBy (comparing fst) . HashMap.toList
 
 
+-- | Optimise a list of chars
+toString :: Pos -> [Value] -> EvalM Value
+toString pos xs
+    | Just cs <- mapM extractChar xs = return $ VString cs
+    | otherwise = failOnValues pos xs
+
 ----------------
-
-inferTypes :: TypeEnv -> Infer.TIState -> Exp -> Either String Scheme
-inferTypes tEnv tState e =
-    fst $ Infer.runTI (Infer.typeInference e) tEnv tState
-
--- Copied/adapter from top-level...
-inferTypeWithEnv :: TypeEnv -> Infer.TIState -> ExpI -> IO (Either String Scheme)
-inferTypeWithEnv tEnv tState ei = runExceptT $ do
-    e <- Parser.resolveImports ei
-    ExceptT $ return $ inferTypes tEnv tState e
-
-inferType :: ExpI -> IO (Either String Scheme)
-inferType = inferTypeWithEnv mempty Infer.initTIState
-
-inferTypeM :: ExpI -> IO (Either String Scheme)
-inferTypeM = inferTypeWithEnv mempty Infer.initTIState
 
 -- data TValue a where
   -- Value -> Type -> TValue a

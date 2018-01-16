@@ -103,14 +103,14 @@ newtype TypeEnv = TypeEnv { unTypeEnv :: Map Name Sigma }
 
 instance View TypeF Type where
   proj    = left . unFix
-  toValue  e  = Fix (e :*: K dummyPos)
+  inj  e  = Fix (e :*: K dummyPos)
 
 dummyPos :: Pos
 dummyPos = newPos "<unknown>" 1 1
 
 instance View TypeF Type' where
   proj = unFix
-  toValue  = Fix
+  inj  = Fix
 
 pattern TForAll vs t       <- (proj -> (TForAllF vs t)) where
   TForAll vs t = inj (TForAllF vs t)
@@ -119,27 +119,27 @@ pattern TVar v             <- (proj -> (TVarF v)) where
 pattern TMetaVar v         <- (proj -> (TMetaVarF v)) where
   TMetaVar v = inj (TMetaVarF v)
 pattern TInt               <- (proj -> TIntF) where
-  TInt = toValue TIntF
+  TInt = inj TIntF
 pattern TDbl               <- (proj -> TDblF) where
-  TDbl = toValue TDblF
+  TDbl = inj TDblF
 pattern TBool              <- (proj -> TBoolF) where
-  TBool = toValue TBoolF
+  TBool = inj TBoolF
 pattern TChar              <- (proj -> TCharF) where
-  TChar = toValue TCharF
+  TChar = inj TCharF
 pattern TFun t1 t2         <- (proj -> (TFunF t1 t2)) where
-  TFun t1 t2 = toValue (TFunF t1 t2)
+  TFun t1 t2 = inj (TFunF t1 t2)
 pattern TMaybe t           <- (proj -> (TMaybeF t)) where
-  TMaybe t = toValue (TMaybeF t)
+  TMaybe t = inj (TMaybeF t)
 pattern TList t            <- (proj -> (TListF t)) where
-  TList t = toValue (TListF t)
+  TList t = inj (TListF t)
 pattern TRecord t          <- (proj -> (TRecordF t)) where
-  TRecord t = toValue (TRecordF t)
+  TRecord t = inj (TRecordF t)
 pattern TVariant t         <- (proj -> (TVariantF t)) where
-  TVariant t = toValue (TVariantF t)
+  TVariant t = inj (TVariantF t)
 pattern TRowEmpty          <- (proj -> TRowEmptyF) where
-  TRowEmpty = toValue TRowEmptyF
+  TRowEmpty = inj TRowEmptyF
 pattern TRowExtend l t1 t2 <- (proj -> (TRowExtendF l t1 t2)) where
-  TRowExtend l t1 t2 = toValue (TRowExtendF l t1 t2)
+  TRowExtend l t1 t2 = inj (TRowExtendF l t1 t2)
 
 class Types a where
   -- | Free type variables
