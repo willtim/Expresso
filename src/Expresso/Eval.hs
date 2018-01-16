@@ -45,7 +45,6 @@ where
 import Control.Monad.Except
 import Data.Foldable (foldrM)
 import Data.HashMap.Strict (HashMap)
-import Data.IORef
 import Data.Coerce
 import Data.Maybe
 import Data.Monoid
