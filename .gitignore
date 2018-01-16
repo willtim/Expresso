@@ -1,2 +1,4 @@
+dist/
+dist-newstyle/
 .DS_Store
 .stack-work

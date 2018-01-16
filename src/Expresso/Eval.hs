@@ -122,15 +122,22 @@ ppValue (VInt  i)   = integer i
 ppValue (VDbl  d)   = double d
 ppValue (VBool b)   = if b then "True" else "False"
 ppValue (VChar c)   = text $ c : []
-ppValue (VString s) = dquotes $ text s
-ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppValue v) mx
+ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppParensValue v) mx
+ppValue (VString s) = string (show s)
 ppValue (VList xs)
-    | Just str <- mapM extractChar xs = dquotes $ text str
+    | Just str <- mapM extractChar xs = string $ show str
     | otherwise     = bracketsList $ map ppValue xs
 ppValue (VRecord m) = bracesList $ map ppEntry $ HashMap.keys m
   where
     ppEntry l = text l <+> "=" <+> "<Thunk>"
 ppValue (VVariant l _) = text l <+> "<Thunk>"
+
+ppParensValue :: Value -> Doc
+ppParensValue v =
+    case v of
+        VMaybe{}   -> parens $ ppValue v
+        VVariant{} -> parens $ ppValue v
+        _          -> ppValue v
 
 -- | This evaluates deeply
 ppValue' :: Value -> EvalM Doc
@@ -138,8 +145,15 @@ ppValue' (VRecord m) = (bracesList . map ppEntry . HashMap.toList)
                            <$> mapM (force >=> ppValue') m
   where
     ppEntry (l, v) = text l <+> text "=" <+> v
-ppValue' (VVariant l t) = (text l <+>) <$> (force >=> ppValue') t
+ppValue' (VVariant l t) = (text l <+>) <$> (force >=> ppParensValue') t
 ppValue' v = return $ ppValue v
+
+ppParensValue' :: Value -> EvalM Doc
+ppParensValue' v =
+    case v of
+        VMaybe{}   -> parens <$> ppValue' v
+        VVariant{} -> parens <$> ppValue' v
+        _          -> ppValue' v
 
 extractChar :: Value -> Maybe Char
 extractChar (VChar c) = Just c
@@ -155,22 +169,26 @@ runEvalM' = runIdentity . runExceptT . runEvalT
 eval :: Env -> Exp -> EvalM Value
 eval env e = cata alg e env
   where
-    alg :: (ExpF Name Bind :*: K Pos) (Env -> EvalM Value)
+    alg :: (ExpF Name Bind Type :*: K Pos) (Env -> EvalM Value)
         -> Env
         -> EvalM Value
-    alg (EVar v :*: _)       env = lookupValue env v >>= force
-    alg (EApp f x :*: K pos) env = do
+    alg (EVar v :*: _)         env = lookupValue env v >>= force
+    alg (EApp f x :*: K pos)   env = do
         f' <- f env
         x' <- mkThunk (x env)
         evalApp pos f' x'
-    alg (ELam b e1 :*: _)    env = return $ VLam $ \x ->
-        bind env b x >>= e1
-    alg (ELet b e1 e2 :*: _) env = do
+    alg (ELam b e1 :*: _  )    env = evalLam env b e1
+    alg (EAnnLam b _ e1 :*: _) env = evalLam env b e1
+    alg (ELet b e1 e2 :*: _)   env = do
         t    <- mkThunk $ e1 env
         env' <- bind env b t
         e2 env'
-    alg (EPrim p :*: K pos)  _   = return $ evalPrim pos p
+    alg (EPrim p :*: K pos)    _   = return $ evalPrim pos p
+    alg (EAnn e _ :*: _)       env = e env
 
+evalLam :: Env -> Bind Name -> (Env -> EvalM Value) -> EvalM Value
+evalLam env b e = return $ VLam $ \x ->
+    bind env b x >>= e
 
 evalApp :: Pos -> Value -> Thunk -> EvalM Value
 evalApp _   (VLam f)   t  = f t
@@ -188,8 +206,13 @@ evalPrim pos p = case p of
     Show          -> mkStrictLam $ \v -> VString . show <$> ppValue' v
     -- Trace
     ErrorPrim     -> VLam $ \s -> do
+{- <<<<<<< HEAD -}
         msg <- fromValue' s
         throwError $ "error (" ++ show pos ++ "):" ++ msg
+{- ======= -}
+        {- msg <- proj' s -}
+        {- throwError $ "error (" ++ show pos ++ "): " ++ msg -}
+{- >>>>>>> tim/master -}
 
     ArithPrim Add -> mkStrictLam2 $ numOp pos (+)
     ArithPrim Sub -> mkStrictLam2 $ numOp pos (-)
@@ -301,6 +324,7 @@ evalPrim pos p = case p of
                           | otherwise -> evalApp pos k (Thunk $ return s)
             v -> throwError $ show pos ++ " : Expected a variant, but got: " ++
                               show (ppValue v)
+    Absurd -> VLam $ \v -> force v >> throwError "The impossible happened!"
     p -> error $ show pos ++ " : Unsupported Prim: " ++ show p
 
 
@@ -353,14 +377,20 @@ equalValues _ (VDbl d1)    (VDbl d2)    = return $ d1 == d2
 equalValues _ (VBool b1)   (VBool b2)   = return $ b1 == b2
 equalValues _ (VChar c1)   (VChar c2)   = return $ c1 == c2
 equalValues _ (VString s1) (VString s2) = return $ s1 == s2
+equalValues p v@VString{}  (VList xs)   = do
+    v' <- toString p xs
+    equalValues p v v'
+equalValues p (VList xs)   v@VString{}  = do
+    v' <- toString p xs
+    equalValues p v' v
+equalValues p (VList xs)   (VList ys)
+    | length xs == length ys = and <$> zipWithM (equalValues p) xs ys
+    | otherwise = return False
 equalValues p (VMaybe m1)  (VMaybe m2)  =
     case (m1, m2) of
       (Just v1, Just v2) -> equalValues p v1 v2
       (Nothing, Nothing) -> return True
       _                  -> return False
-equalValues p (VList xs)   (VList ys)
-    | length xs == length ys = and <$> zipWithM (equalValues p) xs ys
-    | otherwise = return False
 equalValues p (VRecord m1) (VRecord m2) = do
     (ls1, vs1) <- unzip . recordValues <$> mapM force m1
     (ls2, vs2) <- unzip . recordValues <$> mapM force m2
@@ -379,12 +409,12 @@ compareValues _ (VDbl d1)    (VDbl d2)    = return $ compare d1 d2
 compareValues _ (VBool b1)   (VBool b2)   = return $ compare b1 b2
 compareValues _ (VChar c1)   (VChar c2)   = return $ compare c1 c2
 compareValues _ (VString s1) (VString s2) = return $ compare s1 s2
-compareValues p (VMaybe m1)  (VMaybe m2)  =
-    case (m1, m2) of
-      (Just v1, Just v2) -> compareValues p v1 v2
-      (Nothing, Nothing) -> return EQ
-      (Nothing, Just{} ) -> return LT
-      (Just{} , Nothing) -> return GT
+compareValues p v@VString{}  (VList xs)   = do
+    v' <- toString p xs
+    compareValues p v v'
+compareValues p (VList xs)   v@VString{}  = do
+    v' <- toString p xs
+    compareValues p v' v
 compareValues p (VList xs)   (VList ys)   = go xs ys
   where
     go :: [Value] -> [Value] -> EvalM Ordering
@@ -396,11 +426,18 @@ compareValues p (VList xs)   (VList ys)   = go xs ys
           if c == EQ
               then go xs' ys'
               else return c
+compareValues p (VMaybe m1)  (VMaybe m2)  =
+    case (m1, m2) of
+      (Just v1, Just v2) -> compareValues p v1 v2
+      (Nothing, Nothing) -> return EQ
+      (Nothing, Just{} ) -> return LT
+      (Just{} , Nothing) -> return GT
 compareValues p v1 v2 = failOnValues p [v1, v2]
 
 -- | Used for equality of records, sorts values by key
 recordValues :: HashMap Label a -> [(Label, a)]
 recordValues = List.sortBy (comparing fst) . HashMap.toList
+
 
 ----------------
 

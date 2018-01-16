@@ -169,8 +169,8 @@ doTypeOf e = do
     (tEnv, tState, _) <- lift $ gets stateEnv
     ms <- liftIO $ typeOfWithEnv tEnv tState e
     case ms of
-      Left err  -> spew err
-      Right sch -> spew (showType sch)
+      Left err    -> spew err
+      Right sigma -> spew (showType sigma)
 
 doReset :: Repl ()
 doReset = lift $ modify (setEnv $ stateEnv emptyReplState)
@@ -178,8 +178,8 @@ doReset = lift $ modify (setEnv $ stateEnv emptyReplState)
 doDumpEnv :: Repl ()
 doDumpEnv = do
   (TypeEnv binds, _, _) <- lift $ gets stateEnv
-  forM_ (M.toList binds) $ \(name, sch) ->
-      spew $ name ++ " : " ++ showType sch
+  forM_ (M.toList binds) $ \(name, sigma) ->
+      spew $ name ++ " : " ++ showType sigma
 
 parseLine :: String -> Either String Line
 parseLine str

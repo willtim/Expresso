@@ -15,17 +15,19 @@ module Expresso.Syntax where
 import Expresso.Type
 import Expresso.Utils
 
-type ExpI  = Fix ((ExpF Name Bind :+: K Import) :*: K Pos)
-type Exp   = Fix (ExpF Name Bind :*: K Pos)
+type ExpI  = Fix ((ExpF Name Bind Type :+: K Import) :*: K Pos)
+type Exp   = Fix (ExpF Name Bind Type :*: K Pos)
 
 newtype Import = Import { unImport :: FilePath }
 
-data ExpF v b r
+data ExpF v b t r
   = EVar  v
   | EPrim Prim
   | EApp  r r
   | ELam  (b v) r
+  | EAnnLam (b v) t r
   | ELet  (b v) r r
+  | EAnn  r t
   deriving (Show, Functor, Foldable, Traversable)
 
 data Bind v
@@ -72,8 +74,8 @@ data Prim
   | RecordSelect Label
   | RecordExtend Label
   | RecordRestrict Label
-  | EmptyAlt
-  | VarianttoValueect Label
+  | Absurd
+  | VariantInject Label
   | VariantEmbed Label
   | VariantElim Label
   deriving (Eq, Ord, Show)

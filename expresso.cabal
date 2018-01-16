@@ -15,18 +15,19 @@ Library
                    unordered-containers, haskeline, directory, filepath
   Exposed-Modules: Expresso
   Other-Modules:   Expresso.Parser
-                   Expresso.Eval,
-                   Expresso.Type,
-                   Expresso.InferType,
-                   Expresso.Syntax,
-                   Expresso.Pretty,
+                   Expresso.Eval
+                   Expresso.Type
+                   Expresso.TypeCheck
+                   Expresso.Syntax
+                   Expresso.Pretty
                    Expresso.Utils
 
   ghc-options: -O2 -Wall -fwarn-tabs -funbox-strict-fields
                -fno-warn-orphans
                -fno-warn-unused-do-bind
                -fno-warn-name-shadowing
-              --  -fno-warn-missing-pattern-synonym-signatures
+               -fno-warn-name-shadowing
+               -fno-warn-missing-pattern-synonym-signatures
 
 Executable expresso
   Main-Is:         Repl.hs
@@ -34,12 +35,13 @@ Executable expresso
   Build-Depends:   base, containers, hashable, mtl, mtl-compat, void, transformers, parsec, wl-pprint,
                    unordered-containers, haskeline, directory, filepath
   Other-Modules:   Expresso.Parser
-                   Expresso.Eval,
-                   Expresso.Type,
-                   Expresso.InferType,
-                   Expresso.Syntax,
-                   Expresso.Pretty,
+                   Expresso.Eval
+                   Expresso.Type
+                   Expresso.TypeCheck
+                   Expresso.Syntax
+                   Expresso.Pretty
                    Expresso.Utils
+                   Expresso
 
   ghc-options: -O2 -threaded -rtsopts -Wall -fwarn-tabs -funbox-strict-fields
                -fno-warn-orphans

@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 module Expresso.Parser where
 
@@ -7,6 +9,7 @@ import Control.Monad.Except
 import Data.Maybe
 import Text.Parsec hiding (many, optional, parse, (<|>))
 import Text.Parsec.Language (emptyDef)
+import qualified Data.Map as M
 import qualified Text.Parsec as P
 import qualified Text.Parsec.Expr as P
 import qualified Text.Parsec.Token as P
@@ -31,18 +34,27 @@ resolveImports = cataM alg where
 parse :: SourceName -> String -> Either String ExpI
 parse src = showError . P.parse (whiteSpace *> pExp <* P.eof) src
 
-pExp     = pImport
-        <|> pLam
-        <|> pLet
-        <|> pCond
-        <|> pCase
-        <|> pOpExp
-        <?> "expression"
+pExp     = addTypeAnnot
+       <$> getPosition
+       <*> pExp'
+       <*> optional (reservedOp ":" *> pType)
+
+addTypeAnnot pos e (Just t) = withPos pos (EAnn e t)
+addTypeAnnot _   e Nothing  = e
+
+pExp'    = pImport
+       <|> pLam
+       <|> pAnnLam
+       <|> pLet
+       <|> pCond
+       <|> pCase
+       <|> pOpExp
+       <?> "expression"
 
 pImport  = mkImport
-        <$> getPosition
-        <*> (reserved "import" *> stringLiteral)
-        <?> "import"
+       <$> getPosition
+       <*> (reserved "import" *> stringLiteral)
+       <?> "import"
 
 pLet     = reserved "let" *>
            (flip (foldr mkLet) <$> (semiSep1 ((,) <$> getPosition <*> pLetDecl))
@@ -53,12 +65,24 @@ pLetDecl = (,) <$> pLetBind
                <*> (reservedOp "=" *> pExp <* whiteSpace)
 
 pLam     = mkLam
-        <$> getPosition
-        <*> try (pBind <* reservedOp ":" <* whiteSpace)
-        <*> pExp
-        <?> "lambda expression"
+       <$> getPosition
+       <*> try (many1 pBind <* reservedOp "->" <* whiteSpace)
+       <*> pExp'
+       <?> "lambda expression"
 
-pAtom    = pPrim <|> try pVar <|> parens pExp
+pAnnLam  = mkAnnLam
+       <$> getPosition
+       <*> try (many1 pAnnBind <* reservedOp "->" <* whiteSpace)
+       <*> pExp'
+       <?> "lambda expression with type annotated argument"
+
+pAnnBind = parens $ (,) <$> pBind <*> (reservedOp ":" *> pType)
+
+pAtom    = pPrim <|> try pVar <|> parens (pSection <|> pExp)
+
+pSection = pSigSection
+
+pSigSection = mkSigSection <$> getPosition <*> (reservedOp ":" *> pType)
 
 pVar     = mkVar <$> getPosition <*> identifier
 
@@ -134,6 +158,7 @@ pPrimFun = msum
   , fun "ceiling" Ceiling
   , fun "abs"     Abs
   , fun "mod"     Mod
+  , fun "absurd"  Absurd
   ]
   where
     fun sym prim = reserved sym *> ((\pos -> mkPrim pos prim) <$> getPosition)
@@ -167,7 +192,7 @@ pBind = Arg <$> identifier
 
 pLetBind = try (RecWildcard <$ reservedOp "{..}") <|> pBind
 
-pFieldPuns = braces $ identifier `sepBy` comma
+pFieldPuns = braces $ pRecordLabel `sepBy` comma
 
 data Entry = Extend Label ExpI | Update Label ExpI
 
@@ -192,9 +217,11 @@ mkDifferenceRecord pos entries =
         foldr (mkRecordExtend pos) (withPos pos $ EVar "#r") entries
 
 pRecordEntry =
-    try (Extend <$> identifier <*> (reservedOp "=" *> pExp))  <|>
-    try (Update <$> identifier <*> (reservedOp ":=" *> pExp)) <|>
-    mkFieldPun <$> getPosition <*> identifier
+    try (Extend <$> pRecordLabel <*> (reservedOp "=" *> pExp))  <|>
+    try (Update <$> pRecordLabel <*> (reservedOp ":=" *> pExp)) <|>
+    mkFieldPun <$> getPosition <*> pRecordLabel
+
+pRecordLabel  = lowerIdentifier
 
 pVariant = mkVariant <$> getPosition <*> pVariantLabel
 
@@ -214,8 +241,8 @@ pCase = mkCase <$> getPosition
 pCaseBody = mkCaseAlt <$> getPosition <*> pCaseAlt <*> pRest
   where
     pRest = (comma          *> pCaseBody)   <|>
-            (reservedOp "|" *> pLam)        <|>
-            (\pos -> mkPrim pos EmptyAlt) <$> getPosition
+            (reservedOp "|" *> pExp)        <|>
+            (\pos -> mkPrim pos Absurd) <$> getPosition
 
 pCaseAlt =
     (try (Extend <$> pVariantLabel
@@ -224,7 +251,7 @@ pCaseAlt =
                  <*> (whiteSpace *> pLam)))
     <?> "case alternative"
 
-pVariantLabel = (:) <$> upper <*> identifier
+pVariantLabel = upperIdentifier
 
 pMaybe =  (\pos -> mkPrim pos JustPrim)    <$> getPosition <* reserved "Just"
       <|> (\pos -> mkPrim pos NothingPrim) <$> getPosition <* reserved "Nothing"
@@ -254,7 +281,7 @@ mkCaseAlt pos (Extend l altLamE) contE =
 mkCaseAlt pos (Update l altLamE) contE =
     mkApp pos (mkPrim pos $ VariantElim l)
           [ altLamE
-          , mkLam pos (Arg "#r")
+          , mkLam pos [Arg "#r"]
                       (mkApp pos contE [mkEmbed $ withPos pos $ EVar "#r"])
           ]
   where
@@ -270,8 +297,24 @@ mkVariantEmbed pos ls =
   where
     f (pos, l) k = mkApp pos (mkPrim pos $ VariantEmbed l) [k]
 
-mkLam :: Pos -> Bind Name -> ExpI -> ExpI
-mkLam pos b e = withPos pos (ELam b e)
+mkLam :: Pos -> [Bind Name] -> ExpI -> ExpI
+mkLam pos bs e =
+    foldr (\b e -> withPos pos (ELam b e)) e bs
+
+mkAnnLam :: Pos -> [(Bind Name, Type)] -> ExpI -> ExpI
+mkAnnLam pos bs e =
+    foldr (\(b, t) e -> withPos pos (EAnnLam b t e)) e bs
+
+-- | signature section
+--   (:T) becomes (x -> x : T -> T)
+mkSigSection :: Pos -> Type -> ExpI
+mkSigSection pos ty =
+    withPos pos $ EAnn (mkLam pos [Arg "x"] (mkVar pos "x")) ty'
+  where
+    ty' = case ty of
+        (Fix (TForAllF tvs t :*: K pos)) ->
+            withAnn pos (TForAllF tvs (withAnn pos (TFunF t t)))
+        t -> withAnn (getAnn t) (TFunF t t)
 
 mkVar :: Pos -> Name -> ExpI
 mkVar pos name = withPos pos (EVar name)
@@ -318,8 +361,120 @@ mkApp pos f = foldl (\g -> withPos pos . EApp g) f
 mkPrim :: Pos -> Prim -> ExpI
 mkPrim pos p = withPos pos $ EPrim p
 
-withPos :: Pos -> ExpF Name Bind ExpI -> ExpI
+withPos :: Pos -> ExpF Name Bind Type ExpI -> ExpI
 withPos pos = withAnn pos . InL
+
+------------------------------------------------------------
+-- Parsers for type annotations
+
+pType = pTForAll
+    <|> pTFun
+    <|> pType'
+
+pType' = pTVar
+     <|> pTInt
+     <|> pTDbl
+     <|> pTBool
+     <|> pTChar
+     <|> pTRecord
+     <|> pTVariant
+     <|> pTList
+     <|> pTMaybe
+     <|> parens pType
+
+pTForAll = mkTForAll
+        <$> getPosition
+        <*> (reserved "forall" *> many1 pTyVar <* dot)
+        <*> option [] (try pConstraints)
+        <*> pType
+        <?> "forall type annotation"
+
+pConstraints = ((:[]) <$> pConstraint
+           <|> parens (pConstraint `sepBy1` comma))
+           <* reservedOp "=>"
+
+pConstraint = pStarConstraint
+          <|> pRowConstraint
+
+pStarConstraint = (\c n -> (n, c))
+              <$> (CStar <$> pStarHierarchy)
+              <*> lowerIdentifier
+  where
+    pStarHierarchy = reserved "Eq"  *> pure CEq
+                 <|> reserved "Ord" *> pure COrd
+                 <|> reserved "Num" *> pure CNum
+
+pRowConstraint = (,)
+             <$> (lowerIdentifier <* reservedOp "\\")
+             <*> (lacks . (:[]) <$> identifier)
+
+mkTForAll :: Pos -> [TyVar] -> [(Name, Constraint)] -> Type -> Type
+mkTForAll pos tvs (M.fromListWith unionConstraints -> m) t =
+    withAnn pos (TForAllF tvs' t')
+  where
+    t' = substTyVar tvs (map (withAnn pos . TVarF) tvs') t
+    tvs' = [ maybe tv (setConstraint tv) $ M.lookup (tyvarName tv) m
+           | tv <- tvs
+           ]
+    setConstraint tv c = tv { tyvarConstraint = c }
+
+pTVar = (\pos -> withAnn pos . TVarF)
+    <$> getPosition
+    <*> (pTyVar <|> pTWildcard)
+
+pTInt  = pTCon TIntF "Int"
+pTDbl  = pTCon TDblF "Double"
+pTBool = pTCon TBoolF "Bool"
+pTChar = pTCon TCharF "Char"
+
+pTFun = (\pos a b -> withAnn pos (TFunF a b))
+     <$> getPosition
+     <*> try (pType' <* reservedOp "->" <* whiteSpace) -- TODO
+     <*> pType
+     <?> "function type annotation"
+
+pTCon c s = (\pos -> withAnn pos c) <$> getPosition <* reserved s
+
+pTyVar = mkTyVar Bound <$> lowerIdentifier
+pTWildcard = mkTyVar Wildcard "_" <$ reservedOp "_"
+
+mkTyVar flavour name = TyVar flavour name (head name) CNone
+
+pTRecord = mkFromRowType TRecordF
+       <$> getPosition
+       <*> (braces $ optionMaybe (try pTVar <|> pTRowBody pTRecordEntry))
+       <?> "record type annotation"
+
+pTVariant = mkFromRowType TVariantF
+       <$> getPosition
+       <*> (angles $ optionMaybe (try pTVar <|> pTRowBody pTVariantEntry))
+       <?> "variant type annotation"
+
+pTRowBody pEntry = mkTRowExtend
+               <$> getPosition
+               <*> pEntry
+               <*> pRest
+  where
+    pRest = (comma          *> pTRowBody pEntry)  <|>
+            (reservedOp "|" *> pType')            <|>
+            (mkTRowEmpty <$> getPosition)
+
+mkFromRowType tCon pos =
+    withAnn pos . tCon . fromMaybe (mkTRowEmpty pos)
+
+pTRecordEntry = (,) <$> pRecordLabel <*> (reservedOp ":" *> pType)
+pTVariantEntry = (,) <$> pVariantLabel <*> (reservedOp ":" *> pType)
+
+mkTRowExtend pos (l, ty) r = withAnn pos $ TRowExtendF l ty r
+mkTRowEmpty pos = withAnn pos TRowEmptyF
+
+pTList = (\pos -> withAnn pos . TListF)
+     <$> getPosition
+     <*> brackets pType
+
+pTMaybe = (\pos -> withAnn pos . TMaybeF)
+     <$> getPosition
+     <*> (reserved "Maybe" *> pType')
 
 ------------------------------------------------------------
 -- Language definition for Lexer
@@ -334,14 +489,15 @@ languageDef = emptyDef
     , P.identLetter    = alphaNum <|> oneOf "_'"
     , P.opStart        = P.opLetter languageDef
     , P.opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
-    , P.reservedOpNames= [ "=", ":", "-", "*", "/", "+"
+    , P.reservedOpNames= [ "->", "=", "-", "*", "/", "+"
                          , "++", "::", "|", ",", ".", "\\"
                          , "{|", "|}", ":=", "{..}"
                          , "==", "/=", ">", ">=", "<", "<="
-                         , "&&", "||"
+                         , "&&", "||", ":", "=>"
                          ]
     , P.reservedNames  = [ "let", "in", "if", "then", "else", "case", "of"
-                         , "True", "False", "Just", "Nothing"
+                         , "True", "False", "Just", "Nothing", "forall"
+                         , "Eq", "Ord", "Num"
                          ]
     , P.caseSensitive  = True
     }
@@ -351,6 +507,9 @@ languageDef = emptyDef
 -- Lexer
 
 lexer = P.makeTokenParser languageDef
+
+lowerIdentifier = lookAhead lower >> identifier
+upperIdentifier = lookAhead upper >> identifier
 
 identifier = P.identifier lexer
 reserved = P.reserved lexer
