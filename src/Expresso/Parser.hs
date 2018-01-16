@@ -37,7 +37,7 @@ parse src = showError . P.parse (whiteSpace *> pExp <* P.eof) src
 pExp     = addTypeAnnot
        <$> getPosition
        <*> pExp'
-       <*> optional (reservedOp ":" *> pType)
+       <*> optional (reservedOp ":::" *> pType)
 
 addTypeAnnot pos e (Just t) = withPos pos (EAnn e t)
 addTypeAnnot _   e Nothing  = e
@@ -66,23 +66,23 @@ pLetDecl = (,) <$> pLetBind
 
 pLam     = mkLam
        <$> getPosition
-       <*> try (many1 pBind <* reservedOp "->" <* whiteSpace)
+       <*> try (optional (reservedOp "\\") *> many1 pBind <* reservedOp "->" <* whiteSpace)
        <*> pExp'
        <?> "lambda expression"
 
 pAnnLam  = mkAnnLam
        <$> getPosition
-       <*> try (many1 pAnnBind <* reservedOp "->" <* whiteSpace)
+       <*> try (reservedOp "\\" *> many1 pAnnBind <* reservedOp "->" <* whiteSpace)
        <*> pExp'
        <?> "lambda expression with type annotated argument"
 
-pAnnBind = parens $ (,) <$> pBind <*> (reservedOp ":" *> pType)
+pAnnBind = parens $ (,) <$> pBind <*> (reservedOp ":::" *> pType)
 
 pAtom    = pPrim <|> try pVar <|> parens (pSection <|> pExp)
 
-pSection = pSigSection
+pSection = empty -- pSigSection
 
-pSigSection = mkSigSection <$> getPosition <*> (reservedOp ":" *> pType)
+{- pSigSection = mkSigSection <$> getPosition <*> (reservedOp ":" *> pType) -}
 
 pVar     = mkVar <$> getPosition <*> identifier
 
@@ -490,7 +490,7 @@ languageDef = emptyDef
     , P.opStart        = P.opLetter languageDef
     , P.opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
     , P.reservedOpNames= [ "->", "=", "-", "*", "/", "+"
-                         , "++", "::", "|", ",", ".", "\\"
+                         , "++", ":::", "::", "|", ",", ".", "\\"
                          , "{|", "|}", ":=", "{..}"
                          , "==", "/=", ">", ">=", "<", "<="
                          , "&&", "||", ":", "=>"

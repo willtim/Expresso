@@ -62,18 +62,22 @@ data Prim
   | FixPrim
   | FwdComp
   | BwdComp
+
   | JustPrim
   | NothingPrim
   | MaybePrim
+
   | ListEmpty
   | ListCons
   | ListNull    -- needed if list elems have no equality defined
   | ListAppend
   | ListFoldr
+
   | RecordEmpty -- a.k.a. Unit
   | RecordSelect Label
   | RecordExtend Label
   | RecordRestrict Label
+
   | Absurd
   | VariantInject Label
   | VariantEmbed Label

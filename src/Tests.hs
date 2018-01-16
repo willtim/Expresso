@@ -26,40 +26,40 @@ letTests = testGroup
   [ hasValue "let x = 1 in x" (1::Integer)
   , hasValue "let x = 1 in let y = 2 in x + y" (3::Integer)
   , hasValue "let x = 1; y = 2 in x + y" (3::Integer)
-  , hasValue "let {..} = {inc = x -> x + 1} in inc 1" (2::Integer)
-  , hasValue "let m = {inc = x -> x + 1} in m.inc 1" (2::Integer)
+  , hasValue "let {..} = {inc = \\x -> x + 1} in inc 1" (2::Integer)
+  , hasValue "let m = {inc = \\x -> x + 1} in m.inc 1" (2::Integer)
 
-  , hasValue "let m = {id = x -> x} in {foo = [m.id 1], bar = m.id [1]}"
+  , hasValue "let m = {id = \\x -> x} in {foo = [m.id 1], bar = m.id [1]}"
         ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
 
   -- Record argument field-pun generalisation
-  , hasValue "let {id} = {id = x -> x} in {foo = [id 1], bar = id [1]}"
+  , hasValue "let {id} = {id = \\x -> x} in {foo = [id 1], bar = id [1]}"
         ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
-  , hasValue "let {..} = {id = x -> x} in {foo = [id 1], bar = id [1]}"
+  , hasValue "let {..} = {id = \\x -> x} in {foo = [id 1], bar = id [1]}"
         ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
 
     -- Num constraint violation
-  , illTyped "let square = x -> x * x in {foo = square 1, bar = square [1]}"
+  , illTyped "let square = \\x -> x * x in {foo = square 1, bar = square [1]}"
   ]
 
 lambdaTests = testGroup
   "Lambda expressions"
-  [ hasValue "(x -> y -> x + y) 1 2" (3::Integer)
-  , hasValue "(x y -> x + y) 1 2" (3::Integer)
-  , illTyped "x -> x x"
-  , illTyped "let absorb = fix (r x -> r) in absorb"
-  , illTyped "let create = fix (r x -> r x x) in create"
+  [ hasValue "(\\x -> \\y -> x + y) 1 2" (3::Integer)
+  , hasValue "(\\x y -> x + y) 1 2" (3::Integer)
+  , illTyped "\\x -> x x"
+  , illTyped "let absorb = fix (\\r x -> r) in absorb"
+  , illTyped "let create = fix (\\r x -> r x x) in create"
   ]
 
 recordTests = testGroup
   "Record expressions"
-  [ hasValue "({x, y} -> {x, y}) {x=1, y=2}" $ toMap ["x"-->(1::Integer), "y"-->2]
+  [ hasValue "(\\{x, y} -> {x, y}) {x=1, y=2}" $ toMap ["x"-->(1::Integer), "y"-->2]
   , hasValue "{x = 1, y = 2}" $ toMap ["x"-->(1::Integer), "y"-->2]
-  , hasValue "(r -> { x = 1, y = 2 | r}) { z = 3 }" $ toMap ["x"-->(1::Integer), "y"-->2, "z"-->3]
+  , hasValue "(\\r -> { x = 1, y = 2 | r}) { z = 3 }" $ toMap ["x"-->(1::Integer), "y"-->2, "z"-->3]
   , hasValue "{ x = { y = { z = 42 }}}.x.y.z" (42::Integer)
 
   -- Row tail unification soundness
-  , illTyped "r -> if True then { x = 1 | r } else { y = 2 | r }"
+  , illTyped "\\r -> if True then { x = 1 | r } else { y = 2 | r }"
 
   , illTyped "{ x = 2, x = 1 }.x" -- fails to typecheck
   , illTyped "{ x = 2 | { x = 1 }}.x" -- fails to typecheck
@@ -125,8 +125,12 @@ constraintTests = testGroup
 
 rankNTests = testGroup
   "Rank-N polymorphism"
-  [ hasValue "let f = (g : forall a. a -> a) -> {l = g True, r = g 1} in f (x -> x) == {l = True, r = 1}" True
-  , hasValue "let f = g -> {l = g True, r = g 1} : (forall a. a -> a) -> {l : Bool, r : Int } in f (x -> x) == {l = True, r = 1}" True , hasValue "let f = (m : forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = m.reverse \"abc\" } in f (import \"Prelude.x\") == {l = [False, True], r = \"cba\"}" True
+  [ hasValue
+         "let f = \\(g ::: forall a. a -> a) -> {l = g True, r = g 1} in f (\\x -> x) == {l = True, r = 1}" True
+  , hasValue
+         "let f = (\\g -> {l = g True, r = g 1}) ::: ((forall a. a -> a) -> {l : Bool, r : Int }) in f (\\x -> x) == {l = True, r = 1}" True
+  , hasValue
+         "let f = \\(m ::: forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = m.reverse \"abc\" } in f (import \"Prelude.x\") == {l = [False, True], r = \"cba\"}" True
   ]
 
 hasValue :: (Eq a, Show a, FromValue a) => String -> a -> TestTree
