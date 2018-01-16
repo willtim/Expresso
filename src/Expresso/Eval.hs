@@ -206,13 +206,13 @@ evalPrim pos p = case p of
     Show          -> mkStrictLam $ \v -> VString . show <$> ppValue' v
     -- Trace
     ErrorPrim     -> VLam $ \s -> do
-{- <<<<<<< HEAD -}
+{- <<<<<<< HEAD -}
         msg <- fromValue' s
         throwError $ "error (" ++ show pos ++ "):" ++ msg
-{- ======= -}
-        {- msg <- proj' s -}
-        {- throwError $ "error (" ++ show pos ++ "): " ++ msg -}
-{- >>>>>>> tim/master -}
+{- ======= -}
+        {- msg <- proj' s -}
+        {- throwError $ "error (" ++ show pos ++ "): " ++ msg -}
+{- >>>>>>> tim/master -}
 
     ArithPrim Add -> mkStrictLam2 $ numOp pos (+)
     ArithPrim Sub -> mkStrictLam2 $ numOp pos (-)
