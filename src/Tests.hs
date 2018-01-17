@@ -30,13 +30,13 @@ letTests = testGroup
   , hasValue "let m = {inc = \\x -> x + 1} in m.inc 1" (2::Integer)
 
   , hasValue "let m = {id = \\x -> x} in {foo = [m.id 1], bar = m.id [1]}"
-        ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+        $ toMap ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
 
   -- Record argument field-pun generalisation
   , hasValue "let {id} = {id = \\x -> x} in {foo = [id 1], bar = id [1]}"
-        ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+        $ toMap ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
   , hasValue "let {..} = {id = \\x -> x} in {foo = [id 1], bar = id [1]}"
-        ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+        $ toMap ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
 
     -- Num constraint violation
   , illTyped "let square = \\x -> x * x in {foo = square 1, bar = square [1]}"
@@ -69,7 +69,11 @@ recordTests = testGroup
   , hasValue "({| x = 1, y = 2 |} >> {| z = 3 |}) {}" $ toMap ["x"-->(1::Integer), "y"-->2, "z"-->3]
   , hasValue "({| x = 1, y = 2 |} >> {| x := 42 |}) {}" $ toMap ["x"-->(42::Integer), "y"-->2]
   , illTyped "({| x = 1, y = 2 |} << {| x := 42 |}) {}" -- fails to typecheck
-  , hasValue "({| x := 42, y = 2 |} << {| x = 1 |}) {}" ["x"-->(42::Integer), "y"-->2]
+  , hasValue "({| x := 42, y = 2 |} << {| x = 1 |}) {}" $ toMap ["x"-->(42::Integer), "y"-->2]
+
+  -- large record
+  , hasValue ("{ x = True }.x") True
+  , hasValue ("{ x = 2" ++ concat [", x" ++ show n ++ " = 1" | n <- [1..129] ] ++ " }.x") (2::Integer)
   ]
 
 variantTests = testGroup
@@ -127,6 +131,8 @@ rankNTests = testGroup
   "Rank-N polymorphism"
   [ hasValue
          "let f = \\(g ::: forall a. a -> a) -> {l = g True, r = g 1} in f (\\x -> x) == {l = True, r = 1}" True
+  , hasValue
+         "let k = \\f g x -> f (g x) in let t = k (\\{} -> True) (\\x -> {}) False in let xx = k (\\a -> {}) (\\x -> {}) in t" True
   , hasValue
          "let f = (\\g -> {l = g True, r = g 1}) ::: ((forall a. a -> a) -> {l : Bool, r : Int }) in f (\\x -> x) == {l = True, r = 1}" True
   , hasValue

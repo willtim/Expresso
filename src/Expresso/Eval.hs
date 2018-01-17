@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 {-# OPTIONS_GHC -fno-warn-unused-imports #-}
 {-# OPTIONS_GHC -fno-warn-unused-binds #-}
 
@@ -307,24 +308,24 @@ evalPrim pos p = case p of
 
     ListEmpty     -> VList []
     ListNull      -> VLam $ \xs ->
-        (VBool . (null :: [Value] -> Bool)) <$> fromValue' xs
+        (VBool . (null :: [Value] -> Bool)) <$> (force >=> fromValueL return) xs
     ListCons      -> VLam $ \x -> return $ VLam $ \xs ->
-        VList <$> ((:) <$> force x <*> fromValue' xs)
+        VList <$> ((:) <$> force x <*> (force >=> fromValueL return) xs)
     ListAppend    -> VLam $ \xs -> return $ VLam $ \ys ->
-        VList <$> ((++) <$> fromValue' xs <*> fromValue' ys)
+        VList <$> ((++) <$> (force >=> fromValueL return) xs <*> (force >=> fromValueL return) ys)
     ListFoldr     -> mkStrictLam $ \f ->
         return $ VLam $ \z -> return $ VLam $ \xs -> do
         let g a b = do g' <- evalApp pos f (Thunk $ return a)
                        evalApp pos g' (Thunk $ return b)
         z'  <- force z
-        xs' <- fromValue' xs :: EvalM [Value]
+        xs' <- (force >=> fromValueL return) xs :: EvalM [Value]
         foldrM g z' xs'
     RecordExtend l   -> VLam $ \v -> return $ VLam $ \r ->
-        (VRecord . HashMap.insert l v) <$> fromValue' r
+        (VRecord . HashMap.insert l v) <$> (force >=> fromValueRTh) r
     RecordRestrict l -> VLam $ \r ->
-        (VRecord . HashMap.delete l) <$> fromValue' r
+        (VRecord . HashMap.delete l) <$> (force >=> fromValueRTh) r
     RecordSelect l   -> VLam $ \r -> do
-        r' <- fromValue' r
+        r' <- (force >=> fromValueRTh) r
         let err = throwError $ show pos ++ " : " ++ l ++ " not found"
         maybe err force (HashMap.lookup l r')
     RecordEmpty -> VRecord mempty
@@ -481,11 +482,12 @@ data Options = Options
 defaultOptions :: Options
 defaultOptions = Options
 
+typeOf :: HasType a => Proxy a -> Type
+typeOf = snd . typeOfWith defaultOptions NoCtx
+
 -- | Haskell types with a corresponding Expresso type.
 -- TODO generalize proxy?
 class HasType a where
-    typeOf :: Proxy a -> Type
-    typeOf = snd . typeOfWith defaultOptions NoCtx
 
     typeOfWith :: Options -> Ctx -> Proxy a -> (Maybe String, Type)
     default typeOfWith :: (G.Generic a, GHasType (G.Rep a)) => Options -> Ctx -> Proxy a -> (Maybe String, Type)
@@ -494,7 +496,7 @@ class GHasType f where
     gtypeOf :: Options -> Ctx -> Proxy (f x) -> (Maybe String, Type)
 
 -- | Haskell types whose values can be converted to Expresso values.
-class ToValue a where
+class HasType a => ToValue a where
     toValue :: a -> Value
     default toValue :: (G.Generic a, GToValue (G.Rep a)) => a -> Value
     toValue = gtoValue defaultOptions . G.from
@@ -502,7 +504,7 @@ class GToValue f where
     gtoValue :: Options -> f x -> Value
 
 -- | Haskell types whose values can be represented by Expresso values.
-class FromValue a where
+class HasType a => FromValue a where
     fromValue :: MonadEval f => Value -> f a
     default fromValue :: (G.Generic a, GFromValue (G.Rep a), MonadEval f) => Value -> f a
     fromValue x = G.to <$> gfromValue defaultOptions x
@@ -704,6 +706,9 @@ instance FromValue a => FromValue [a] where
     fromValue (VList xs) = mapM fromValue xs
     fromValue v          = failfromValue "VList" v
 
+fromValueL fromValue (VList xs) = mapM fromValue xs
+fromValueL _         v          = failfromValue "VList" v
+
 -- FIXME carry type in class to make this safe
 instance (ToValue a, FromValue b) => FromValue (a -> b) where
     fromValue (VLam f) = fmap (fmap $ either (error "unexpected") id) $ pure $ \x -> runEvalM' $ do
@@ -713,35 +718,41 @@ instance (ToValue a, FromValue b) => FromValue (a -> b) where
     fromValue v           = failfromValue "VLam" v
 
 -- TODO Questionable...
-instance FromValue Value where
-    fromValue v        = return v
+{- instance FromValue Value where -}
+    {- fromValue v        = return v -}
 
-instance
---  {-# OVERLAPS #-}
-  FromValue [Value] where
-    fromValue (VList xs)  = return xs
-    fromValue (VString s) = return $ map VChar s
-    fromValue v           = failfromValue "VList" v
+{- instance -}
+{- --  {-# OVERLAPS #-} -}
+  {- FromValue [Value] where -}
+    {- fromValue (VList xs)  = return xs -}
+    {- fromValue (VString s) = return $ map VChar s -}
+    {- fromValue v           = failfromValue "VList" v -}
 
+-- | A record where all fields have the same type.
+instance HasType a => HasType (HashMap Name a) where
+    typeOfWith = error "Impossible: TODO rewrite tests to use real HS records instead of faking it"
 instance FromValue a => FromValue (HashMap Name a) where
     fromValue (VRecord m) = mapM fromValue' m
     fromValue v           = failfromValue "VRecord" v
 
-instance
---  {-# OVERLAPS #-}
-  FromValue a => FromValue [(Name, a)] where
-    fromValue v             = HashMap.toList <$> fromValue v
+{- instance -}
+{- --  {-# OVERLAPS #-} -}
+  {- FromValue a => FromValue [(Name, a)] where -}
+    {- fromValue v             = HashMap.toList <$> fromValue v -}
 
-instance
---  {-# OVERLAPS #-}
-  FromValue (HashMap Name Thunk) where
-    fromValue (VRecord m) = return m
-    fromValue v           = failfromValue "VRecord" v
+{- instance -}
+{- --  {-# OVERLAPS #-} -}
+  {- FromValue (HashMap Name Thunk) where -}
+    {- fromValue (VRecord m) = return m -}
+    {- fromValue v           = failfromValue "VRecord" v -}
 
-instance
---  {-# OVERLAPS #-}
-  FromValue [(Name, Thunk)] where
-    fromValue v           = HashMap.toList <$> fromValue v
+fromValueRTh (VRecord m) = return m
+fromValueRTh v           = failfromValue "VRecord" v
+
+{- instance -}
+{- --  {-# OVERLAPS #-} -}
+  {- FromValue [(Name, Thunk)] where -}
+    {- fromValue v           = HashMap.toList <$> fromValue v -}
 
 failfromValue :: MonadError String f => String -> Value -> f a
 failfromValue desc v = throwError $ "Expected a " ++ desc ++

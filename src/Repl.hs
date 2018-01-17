@@ -151,7 +151,7 @@ doCommand c = case c of
 doEval :: (Value -> IO String) -> ExpI -> Repl ()
 doEval pp e = do
   envs <- lift $ gets stateEnv
-  v'e  <- liftIO $ evalWithEnv envs e
+  v'e  <- liftIO $ evalWithEnv' envs e
   case v'e of
       Left err  -> spew err
       Right val -> liftIO (pp val) >>= spew

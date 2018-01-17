@@ -16,6 +16,7 @@ module Expresso
   , evalFile
   , evalString
   , evalWithEnv
+  , evalWithEnv'
   , showType
   , showValue
   , showValue'
@@ -58,16 +59,19 @@ evalWithEnv
     => (TypeEnv, TIState, Env)
     -> ExpI
     -> IO (Either String a)
-evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
-{- <<<<<<< HEAD -}
-  {- e    <- Parser.resolveImports ei -}
-  {- _sch <- ExceptT . return $ inferTypes tEnv tState e -}
-  {- ExceptT $ runEvalM . (Eval.eval env >=> Eval.fromValue) $ e -}
-{- ======= -}
+evalWithEnv env expr = runExceptT $ do
+  v <- ExceptT $ evalWithEnv' env expr
+  ExceptT $ runEvalM $ Eval.fromValue v
+
+evalWithEnv'
+    :: (TypeEnv, TIState, Env)
+    -> ExpI
+    -> IO (Either String Value)
+evalWithEnv' (tEnv, tState, env) ei = runExceptT $ do
   e      <- Parser.resolveImports ei
   _sigma <- ExceptT . return $ inferTypes tEnv tState e
-  ExceptT $ runEvalM . (Eval.eval env >=> Eval.fromValue) $ e
-{- >>>>>>> tim/master -}
+  ExceptT $ runEvalM . (Eval.eval env {- >=> Eval.fromValue-}) $ e
+
 
 eval :: FromValue a => ExpI -> IO (Either String a)
 eval = evalWithEnv (mempty, initTIState, mempty)
