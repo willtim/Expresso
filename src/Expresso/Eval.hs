@@ -508,6 +508,12 @@ class HasType a where
     default typeOfWith :: (G.Generic a, GHasType (G.Rep a)) => Options -> Ctx -> Proxy a -> (Maybe String, Type)
     typeOfWith opts ct = gtypeOf opts ct . fmap G.from
 class GHasType f where
+    -- Give the Expresso type for a generic representation
+    --
+    -- Ctx is used to signify Record vs Variant context
+    --
+    -- The (Maybe String) contains constructor/selector names that we want to propagate to
+    -- the outer level, so we can translate e.g. (Maybe a) as <Nothing, Just: a>
     gtypeOf :: Options -> Ctx -> Proxy (f x) -> (Maybe String, Type)
 
 -- | Haskell types whose values can be converted to Expresso values.
@@ -552,7 +558,7 @@ instance GHasType (G.V1) where
     gtypeOf opts Var _ = pure $ _TRowEmpty
     gtypeOf opts _ _   = pure $ _TVariant $ _TRowEmpty
 
--- FIXME this allows infinite types to be generated
+-- FIXME this allows infinite types to be generated, but is also necessary for valid cases
 -- Can we forbid recursive Haskell types altogether?
 instance HasType c => GHasType (G.K1 t c) where
     gtypeOf opts ct proxy = typeOfWith opts NoCtx (G.unK1 <$> proxy)
@@ -566,6 +572,8 @@ instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where
           (Just rLabel, rType) -> pure $ tag ct (_TRowExtend lLabel lType (_TRowExtend rLabel rType _TRowEmpty))
           (Nothing, rType) ->     pure $ tag ct (_TRowExtend lLabel lType rType)
     where
+      -- Emit variant tag whenever we're entering a variant context
+      -- If we're already inside a variant, just emit the row type component
       tag Var = id
       tag ct  = _TVariant
 
@@ -578,6 +586,7 @@ instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
           (Just rLabel, rType) -> pure $ tag ct (_TRowExtend (fl lLabel) lType (_TRowExtend (fr rLabel) rType _TRowEmpty))
           (Nothing, rType) ->     pure $ tag ct (_TRowExtend (fl lLabel) lType rType)
     where
+      -- Replace empty field names with dummy names, so e.g. (4,5) becomes {_1:4,_2:5}
       fl "" = "_" ++ show (used + 1)
       fl x  = x
       fr "" = "_" ++ show (used + 2)
@@ -586,6 +595,9 @@ instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
       used = case ct of
         (Rec n) -> n
         _ -> 0
+
+      -- Emit record tag whenever we're entering a record context
+      -- If we're already inside a record, just emit the row type component
       tag Rec{} = id
       tag ct    = _TRecord
 
@@ -607,10 +619,10 @@ instance GToValue f => GToValue (G.S1 c f) where
   gtoValue opts (G.M1 x) = gtoValue opts x
 
 instance GToValue G.U1 where
-  gtoValue = error "TODO"
+  gtoValue opts _ = VRecord mempty
 
 instance GToValue G.V1 where
-  gtoValue = error "TODO"
+  gtoValue = error "absurd"
 
 instance GToValue (G.K1 t c) where
   gtoValue = error "TODO"
@@ -692,7 +704,8 @@ codom :: proxy (a -> b) -> Proxy b
 codom = inside
 
 
-
+instance ToValue ()
+instance ToValue Void
 instance ToValue Integer where
     toValue = VInt
 instance ToValue Int where
@@ -757,6 +770,7 @@ instance (ToValue a, FromValue b) => FromValue (a -> b) where
     fromValue v           = failfromValue "VLam" v
 
 
+-- FIXME remove
 -- | A record where all fields have the same type.
 instance HasType a => HasType (HashMap Name a) where
     typeOfWith = error "Impossible: FIXME rewrite tests to use real HS records instead of faking it"
