@@ -542,6 +542,7 @@ class GFromValue g where
 -- proper (right-associative) rows. For records we also keep track of the number of elements, so we
 -- can generate default selector functions _1, _2, _3 etc.
 data Ctx = NoCtx | Var | Rec Int
+  deriving (Show)
 
 setTag :: b -> (Maybe b, a) -> (Maybe b, a)
 setTag b (_, a) = (Just b, a)
@@ -572,7 +573,8 @@ instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where
   gtypeOf opts ct proxy =
     case gtypeOf opts NoCtx (leftP proxy) of
       -- Nothing is impossible, as we know the left branch will be a constructor (so the C1 instance is used)
-      (Nothing, lType) -> error "GHasType (f G.:+: g): should not happen"
+      (Nothing, lType) ->
+        error "FIXME can happen: tree is balanced"
       (Just lLabel, lType) ->
         case gtypeOf opts Var (rightP proxy) of
           (Just rLabel, rType) -> pure $ tag ct (_TRowExtend lLabel lType (_TRowExtend rLabel rType _TRowEmpty))
@@ -587,7 +589,8 @@ instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
   gtypeOf opts ct proxy =
     case gtypeOf opts NoCtx (leftP proxy) of
       -- Nothing is impossible, as we know the left branch will be a selector (so the S1 instance is used)
-      (Nothing, lType) -> error "GHasType (f G.:*: g): should not happen"
+      (Nothing, lType) ->
+        error "FIXME can happen: tree is balanced"
       (Just lLabel, lType) ->
         case gtypeOf opts (Rec $ succ $ used) (rightP proxy) of
           (Just rLabel, rType) -> pure $ tag ct (_TRowExtend (fl lLabel) lType (_TRowExtend (fr rLabel) rType _TRowEmpty))
@@ -640,26 +643,34 @@ instance (GToValue f, GToValue g) => GToValue (f G.:+: g) where
 -- TODO get tag from underlying value...
 instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
   gtoValue opts ct (l G.:*: r) =
-    case valueToThunk $ gtoValue opts NoCtx l of
-      lv -> case gtoValue opts (Rec $ succ $ used) r of
+    case (gtypeOf opts NoCtx (pure l), gtoValue opts NoCtx l) of
+      (lt, lv) -> case (gtypeOf opts incCtx (pure r), gtoValue opts incCtx r) of
         -- TODO get labels..
         -- FIXME this record case depends on context...
-        VRecord rv -> VRecord (HashMap.singleton "fox" lv <> rv)
-        v          -> VRecord (HashMap.fromList [("foo", lv), ("bar", valueToThunk v)])
+        (rt, rv) -> trace (show (ct, fmap ppType lt, ppValue lv, fmap ppType rt, ppValue rv)) (VInt 0)
+        {- (VRecord rv -> VRecord (HashMap.singleton "fox" lv <> rv) -}
+        {- v          -> VRecord (HashMap.fromList [("foo", lv), ("bar", valueToThunk v)]) -}
         {- v -> error $ "Expected VRecord, got " ++ show (ppValue v) -}
     where
+      incCtx =(Rec $ succ $ used)
       used = case ct of
         (Rec n) -> n
         _ -> 0
 
 
 -- TODO for testing...
+data S a = S { s :: a } deriving (G.Generic)
+instance (HasType a) => HasType (S a)
+instance (ToValue a) => ToValue (S a)
 data P a b = P { a :: a, b :: b } deriving (G.Generic)
 instance (HasType a, HasType b) => HasType (P a b)
 instance (ToValue a, ToValue b) => ToValue (P a b)
 data T a b c = T { x :: a, y :: b, z :: c } deriving (G.Generic)
 instance (HasType a, HasType b, HasType c) => HasType (T a b c)
 instance (ToValue a, ToValue b, ToValue c) => ToValue (T a b c)
+data Q a b c d = Q { m :: a, n :: b, o :: c, p :: d } deriving (G.Generic)
+instance (HasType a, HasType b, HasType c, HasType d) => HasType (Q a b c d)
+instance (ToValue a, ToValue b, ToValue c, ToValue d) => ToValue (Q a b c d)
 
 
 instance GFromValue f => GFromValue (G.D1 c f) where
