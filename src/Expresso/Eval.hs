@@ -38,13 +38,17 @@ module Expresso.Eval(
   , runEvalM
   , Env
   , EvalM
-  , FromValue(..)
   , Value(..)
   , ppValue
   , ppValue'
   , force
   , mkThunk
   , bind
+  -- * Foreign
+  , typeOf
+  , HasType(..)
+  , FromValue(..)
+  , ToValue(..)
 )
 where
 
@@ -573,16 +577,6 @@ instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
         _ -> 0
       tag Rec{} = id
       tag ct    = _TRecord
-    --
-    -- gtypeOf opts ct proxy = pure $ TRecord (TRowExtend lLabel lType (TRowExtend rLabel rType TRowEmpty))
-    --   where
-    --     lLabel = if lLabel1 == "" then "_1" else lLabel1
-    --     rLabel = if rLabel1 == "" then "_2" else rLabel1
-    --     (Just lLabel1, lType) = gtypeOf opts ct (leftP proxy)
-    --     (Just rLabel1, rType) = gtypeOf opts ct (rightP proxy)
-
--- genericTypeOf :: G.Generic a => proxy a -> Type
--- genericTypeOf = undefined
 
 leftP :: forall (q :: (k -> k) -> (k -> k) -> k -> k) f g a . Proxy ((f `q` g) a) -> Proxy (f a)
 leftP _ = Proxy
@@ -622,6 +616,8 @@ instance (GFromValue f, GFromValue g) => GFromValue (f G.:*: g) where
 
 instance HasType Integer where
     typeOfWith _ _ _ = pure $ _TInt
+instance HasType Int where
+    typeOfWith _ _ _ = pure $ _TInt
 instance HasType Double where
     typeOfWith _ _ _ = pure $ _TDbl
 instance HasType Char where
@@ -631,11 +627,14 @@ instance (HasType a, HasType b) => HasType (a -> b) where
 instance HasType Void
 instance HasType ()
 instance HasType Bool
+{- instance HasType Rational -}
 instance HasType Ordering
+-- FIXME remove Maybe/Char from lang, add Text
 instance (HasType a) => HasType (Maybe a)
 instance (HasType a, HasType b) => HasType (Either a b)
 instance (HasType a, HasType b) => HasType (a, b)
--- instance (HasType a, HasType b, HasType c) => HasType (a, b, c)
+instance (HasType a, HasType b, HasType c) => HasType (a, b, c)
+instance (HasType a, HasType b, HasType c, HasType d) => HasType (a, b, c, d)
 -- instance ToValue a => ToValue (Maybe a)
 instance HasType a => HasType [a] where
     typeOfWith opts ct p = _TList <$> typeOfWith opts ct (inside p)

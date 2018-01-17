@@ -1,3 +1,5 @@
+
+{-# LANGUAGE DeriveGeneric #-}
 module Main where
 
 import Test.Tasty (TestTree, defaultMain, testGroup)
@@ -5,7 +7,12 @@ import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 
-import Expresso
+import GHC.Generics
+import Data.Proxy
+
+import Expresso hiding (typeOf) -- TODO resolve conflict
+-- TODO reexport
+import Expresso.Eval
 
 main = defaultMain unitTests
 
@@ -19,6 +26,9 @@ unitTests = testGroup
   , relationalTests
   , constraintTests
   , rankNTests
+  , foreignTypeTests
+  , foreignImportTests
+  , foreignExportTests
   ]
 
 letTests = testGroup
@@ -138,6 +148,44 @@ rankNTests = testGroup
   , hasValue
          "let f = \\(m ::: forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = m.reverse \"abc\" } in f (import \"Prelude.x\") == {l = [False, True], r = \"cba\"}" True
   ]
+
+-- Marshalling
+data Rat = Rat { nom :: Integer, denom :: Integer } | Simple Integer deriving (Generic)
+
+foreignTypeTests = testGroup
+  "Foreign types"
+  [ hasType (xx :: Proxy Int) "Int"
+  , hasType (xx :: Proxy Integer) "Int"
+  , hasType (xx :: Proxy Double) "Double"
+  , hasType (xx :: Proxy [(Int,Bool)]) "[(Int,Bool)]"
+  , doesNotHaveType (xx :: Proxy Int) "Bool"
+  ]
+foreignImportTests = testGroup
+  "Foreign import"
+  [
+  ]
+foreignExportTests = testGroup
+  "Foreign export"
+  [
+  ]
+
+xx :: Proxy a
+xx = error "Do not evaluate"
+
+hasType :: HasType a => Proxy a -> String -> TestTree
+hasType hsTy expected = testCase caseStr $
+  assertEqual "" expected (show $ ppType $ typeOf hsTy)
+  where
+    caseStr = show hsTy ++ " " ++ show expected
+
+doesNotHaveType :: HasType a => Proxy a -> String -> TestTree
+doesNotHaveType hsTy expected = testCase caseStr $
+  if expected == actual
+    then assertFailure $ "The Haskell type " ++ expected ++ " should not correspond to " ++ actual
+    else assertTrue
+  where
+    actual = show $ ppType $ typeOf hsTy
+    caseStr = show hsTy ++ " " ++ show expected
 
 hasValue :: (Eq a, Show a, FromValue a) => String -> a -> TestTree
 hasValue str expected = testCase str $ do
