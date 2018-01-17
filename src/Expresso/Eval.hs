@@ -127,7 +127,7 @@ data Value
   | VDbl     !Double
   | VBool    !Bool
   | VChar    !Char
-  | VString  !String  -- an optimisation
+  {- | VString  !String  -- an optimisation -}
   | VMaybe   !(Maybe Value)
   | VList    ![Value] -- lists are strict
   | VRecord  !(HashMap Label Thunk) -- field order no defined
@@ -148,7 +148,7 @@ ppValue (VDbl  d)   = double d
 ppValue (VBool b)   = if b then "True" else "False"
 ppValue (VChar c)   = text $ c : []
 ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppParensValue v) mx
-ppValue (VString s) = string (show s)
+{- ppValue (VString s) = string (show s) -}
 ppValue (VList xs)
     | Just str <- mapM extractChar xs = string $ show str
     | otherwise     = bracketsList $ map ppValue xs
@@ -227,8 +227,12 @@ evalPrim pos p = case p of
     Dbl d         -> VDbl d
     Bool b        -> VBool b
     Char c        -> VChar c
-    String s      -> VString s
-    Show          -> mkStrictLam $ \v -> VString . show <$> ppValue' v
+    {- String s      -> VString s -}
+    String s      -> VList (fmap VChar s)
+    Show          -> mkStrictLam $ \v -> string . show <$> ppValue' v
+      where
+        {- string = VString -}
+        string = VList . fmap VChar
     -- Trace
     ErrorPrim     -> VLam $ \s -> do
 {- <<<<<<< HEAD -}
@@ -401,13 +405,13 @@ equalValues _ (VInt i1)    (VInt i2)    = return $ i1 == i2
 equalValues _ (VDbl d1)    (VDbl d2)    = return $ d1 == d2
 equalValues _ (VBool b1)   (VBool b2)   = return $ b1 == b2
 equalValues _ (VChar c1)   (VChar c2)   = return $ c1 == c2
-equalValues _ (VString s1) (VString s2) = return $ s1 == s2
-equalValues p v@VString{}  (VList xs)   = do
-    v' <- toString p xs
-    equalValues p v v'
-equalValues p (VList xs)   v@VString{}  = do
-    v' <- toString p xs
-    equalValues p v' v
+{- equalValues _ (VString s1) (VString s2) = return $ s1 == s2 -}
+{- equalValues p v@VString{}  (VList xs)   = do -}
+    {- v' <- toString p xs -}
+    {- equalValues p v v' -}
+{- equalValues p (VList xs)   v@VString{}  = do -}
+    {- v' <- toString p xs -}
+    {- equalValues p v' v -}
 equalValues p (VList xs)   (VList ys)
     | length xs == length ys = and <$> zipWithM (equalValues p) xs ys
     | otherwise = return False
@@ -433,13 +437,13 @@ compareValues _ (VInt i1)    (VInt i2)    = return $ compare i1 i2
 compareValues _ (VDbl d1)    (VDbl d2)    = return $ compare d1 d2
 compareValues _ (VBool b1)   (VBool b2)   = return $ compare b1 b2
 compareValues _ (VChar c1)   (VChar c2)   = return $ compare c1 c2
-compareValues _ (VString s1) (VString s2) = return $ compare s1 s2
-compareValues p v@VString{}  (VList xs)   = do
-    v' <- toString p xs
-    compareValues p v v'
-compareValues p (VList xs)   v@VString{}  = do
-    v' <- toString p xs
-    compareValues p v' v
+{- compareValues _ (VString s1) (VString s2) = return $ compare s1 s2 -}
+{- compareValues p v@VString{}  (VList xs)   = do -}
+    {- v' <- toString p xs -}
+    {- compareValues p v v' -}
+{- compareValues p (VList xs)   v@VString{}  = do -}
+    {- v' <- toString p xs -}
+    {- compareValues p v' v -}
 compareValues p (VList xs)   (VList ys)   = go xs ys
   where
     go :: [Value] -> [Value] -> EvalM Ordering
@@ -465,10 +469,10 @@ recordValues = List.sortBy (comparing fst) . HashMap.toList
 
 
 -- | Optimise a list of chars
-toString :: Pos -> [Value] -> EvalM Value
-toString pos xs
-    | Just cs <- mapM extractChar xs = return $ VString cs
-    | otherwise = failOnValues pos xs
+{- toString :: Pos -> [Value] -> EvalM Value -}
+{- toString pos xs -}
+    {- | Just cs <- mapM extractChar xs = return $ VString cs -}
+    {- | otherwise = failOnValues pos xs -}
 
 ----------------
 
@@ -709,8 +713,13 @@ instance FromValue a => FromValue (Maybe a) where
 instance
 --  {-# OVERLAPS #-}
   FromValue String where
-    fromValue (VString s) = return s
+    {- fromValue (VString s) = return s -}
+    fromValue (VList xs)  = traverse getC xs
     fromValue v           = failfromValue "VString" v
+      where
+{- getC :: Value -> EvalM Char -}
+getC (VChar c) = pure c
+getC v = failfromValue "VString" v
 
 instance FromValue a => FromValue [a] where
     fromValue (VList xs) = mapM fromValue xs
