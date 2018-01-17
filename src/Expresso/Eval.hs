@@ -628,26 +628,26 @@ instance (GToValue f, G.Constructor c) => GToValue (G.C1 c f) where
 instance (GToValue f, G.Selector c) => GToValue (G.S1 c f) where
   gtoValue opts ct (G.M1 x) = gtoValue opts ct x
 
+instance ToValue c => GToValue (G.K1 t c) where
+  gtoValue opts ct v = toValueWith opts NoCtx (G.unK1 v)
+
 instance GToValue G.U1 where
   gtoValue opts ct _ = VRecord mempty
 
 instance GToValue G.V1 where
   gtoValue = error "absurd"
 
-instance ToValue c => GToValue (G.K1 t c) where
-  gtoValue opts ct v = toValueWith opts NoCtx (G.unK1 v)
-
 instance (GToValue f, GToValue g) => GToValue (f G.:+: g) where
   gtoValue = error "TODO"
 
 -- TODO get tag from underlying value...
 instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
-  gtoValue opts ct (l G.:*: r) =
+  gtoValue opts ct lr@(l G.:*: r) =
     case (gtypeOf opts NoCtx (pure l), gtoValue opts NoCtx l) of
       (lt, lv) -> case (gtypeOf opts incCtx (pure r), gtoValue opts incCtx r) of
         -- TODO get labels..
         -- FIXME this record case depends on context...
-        (rt, rv) -> trace (show (ct, fmap ppType lt, ppValue lv, fmap ppType rt, ppValue rv)) (VInt 0)
+        (rt, rv) -> trace (show (ct, fmap ppType $ gtypeOf opts NoCtx (pure lr), fmap ppType lt, ppValue lv, fmap ppType rt, ppValue rv)) (VInt 0)
         {- (VRecord rv -> VRecord (HashMap.singleton "fox" lv <> rv) -}
         {- v          -> VRecord (HashMap.fromList [("foo", lv), ("bar", valueToThunk v)]) -}
         {- v -> error $ "Expected VRecord, got " ++ show (ppValue v) -}
@@ -659,18 +659,18 @@ instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
 
 
 -- TODO for testing...
-data S a = S { s :: a } deriving (G.Generic)
-instance (HasType a) => HasType (S a)
-instance (ToValue a) => ToValue (S a)
-data P a b = P { a :: a, b :: b } deriving (G.Generic)
-instance (HasType a, HasType b) => HasType (P a b)
-instance (ToValue a, ToValue b) => ToValue (P a b)
-data T a b c = T { x :: a, y :: b, z :: c } deriving (G.Generic)
-instance (HasType a, HasType b, HasType c) => HasType (T a b c)
-instance (ToValue a, ToValue b, ToValue c) => ToValue (T a b c)
-data Q a b c d = Q { m :: a, n :: b, o :: c, p :: d } deriving (G.Generic)
-instance (HasType a, HasType b, HasType c, HasType d) => HasType (Q a b c d)
-instance (ToValue a, ToValue b, ToValue c, ToValue d) => ToValue (Q a b c d)
+data V1 a = S { s :: a } deriving (G.Generic)
+instance (HasType a) => HasType (V1 a)
+instance (ToValue a) => ToValue (V1 a)
+data V2 a b = P { a :: a, b :: b } deriving (G.Generic)
+instance (HasType a, HasType b) => HasType (V2 a b)
+instance (ToValue a, ToValue b) => ToValue (V2 a b)
+data V3 a b c = T { x :: a, y :: b, z :: c } deriving (G.Generic)
+instance (HasType a, HasType b, HasType c) => HasType (V3 a b c)
+instance (ToValue a, ToValue b, ToValue c) => ToValue (V3 a b c)
+data V4 a b c d = Q { m :: a, n :: b, o :: c, p :: d } deriving (G.Generic)
+instance (HasType a, HasType b, HasType c, HasType d) => HasType (V4 a b c d)
+instance (ToValue a, ToValue b, ToValue c, ToValue d) => ToValue (V4 a b c d)
 
 
 instance GFromValue f => GFromValue (G.D1 c f) where
