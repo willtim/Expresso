@@ -133,6 +133,13 @@ data Value
   | VRecord  !(HashMap Label Thunk) -- field order no defined
   | VVariant !Label !Thunk
 
+{- applyV :: Value -> Value -> EvalM Value -}
+{- applyV (VLam f) x = f (valueToThunk x) -}
+  {- where -}
+    {- valueToThunk :: Value -> Thunk -}
+    {- valueToThunk = Thunk . pure -}
+{- applyV f x = throwError $ "Not a function: " -- TODO ++ show f -}
+
 -- | This does *not* evaluate deeply
 ppValue :: Value -> Doc
 ppValue (VLam  _)   = "<Lambda>"
@@ -622,12 +629,14 @@ instance HasType Double where
     typeOfWith _ _ _ = pure $ _TDbl
 instance HasType Char where
     typeOfWith _ _ _ = pure $ _TChar
+instance HasType a => HasType [a] where
+    typeOfWith opts ct p = _TList <$> typeOfWith opts ct (inside p)
 instance (HasType a, HasType b) => HasType (a -> b) where
     typeOfWith opts ct p = _TFun <$> (typeOfWith opts ct $ dom p) <*> (typeOfWith opts ct $ inside p)
+
 instance HasType Void
 instance HasType ()
 instance HasType Bool
-{- instance HasType Rational -}
 instance HasType Ordering
 -- FIXME remove Maybe/Char from lang, add Text
 instance (HasType a) => HasType (Maybe a)
@@ -635,27 +644,21 @@ instance (HasType a, HasType b) => HasType (Either a b)
 instance (HasType a, HasType b) => HasType (a, b)
 instance (HasType a, HasType b, HasType c) => HasType (a, b, c)
 instance (HasType a, HasType b, HasType c, HasType d) => HasType (a, b, c, d)
--- instance ToValue a => ToValue (Maybe a)
-instance HasType a => HasType [a] where
-    typeOfWith opts ct p = _TList <$> typeOfWith opts ct (inside p)
--- instance HasType Void where
---     typeOf p = _TVariant _TRowEmpty
--- instance HasType () where
---     typeOf p = _TRecord _TRowEmpty
+-- TODO Vector/Set (as []), map as [Entry]
 
 
--- FIXME move
--- <Leaf:Int | <Node:{left:Int,right:[Int]} | <>>>
-data Foo a = Leaf a | Node { left :: a, right :: a }
-  deriving G.Generic
-instance (HasType a) => HasType (Foo a)
-instance ToValue a => ToValue (Foo a)
-instance FromValue a => FromValue (Foo a)
+{- FIXME move -}
+{- <Leaf:Int | <Node:{left:Int,right:[Int]} | <>>> -}
+{- data Foo a = Leaf a | Node { left :: a, right :: a } -}
+  {- deriving G.Generic -}
+{- instance (HasType a) => HasType (Foo a) -}
+{- instance ToValue a => ToValue (Foo a) -}
+{- instance FromValue a => FromValue (Foo a) -}
 
-data Tree a = TLeaf a | TNode { tleft :: a, tright :: Tree a }
-  deriving G.Generic
--- instance (HasType a) => HasType (Tree a)
--- instance ToValue a => ToValue (Foo a)
+{- data Tree a = TLeaf a | TNode { tleft :: a, tright :: Tree a } -}
+  {- deriving G.Generic -}
+{- instance (HasType a) => HasType (Tree a) -}
+{- instance ToValue a => ToValue (Foo a) -}
 
 inside :: proxy (f a) -> Proxy a
 inside = const Proxy
@@ -670,19 +673,27 @@ codom = inside
 
 instance ToValue Integer where
     toValue = VInt
+instance ToValue Int where
+    toValue = VInt . fromIntegral
 instance ToValue Double where
     toValue = VDbl
 instance ToValue Char where
     toValue = VChar
+instance ToValue a => ToValue [a] where
+    toValue = VList . fmap toValue
 
 instance FromValue Integer where
     fromValue (VInt i) = return i
     fromValue v        = failfromValue "VInt" v
 
+instance FromValue Int where
+    fromValue x = fromInteger <$> fromValue x
+
 instance FromValue Double where
     fromValue (VDbl d) = return d
     fromValue v        = failfromValue "VDbl" v
 
+-- TODO derive
 instance FromValue Bool where
     fromValue (VBool b) = return b
     fromValue v         = failfromValue "VBool" v

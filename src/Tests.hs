@@ -9,6 +9,8 @@ import qualified Data.HashMap.Strict as HashMap
 
 import GHC.Generics
 import Data.Proxy
+import Data.Void
+import Data.Map (Map)
 
 import Expresso hiding (typeOf) -- TODO resolve conflict
 -- TODO reexport
@@ -152,21 +154,42 @@ rankNTests = testGroup
 -- Marshalling
 data Rat = Rat { nom :: Integer, denom :: Integer } | Simple Integer deriving (Generic)
 
+instance HasType Rat
+instance FromValue Rat
+instance ToValue Rat
+
 foreignTypeTests = testGroup
   "Foreign types"
   [ hasType (xx :: Proxy Int) "Int"
   , hasType (xx :: Proxy Integer) "Int"
   , hasType (xx :: Proxy Double) "Double"
-  , hasType (xx :: Proxy [(Int,Bool)]) "[(Int,Bool)]"
+  , hasType (xx :: Proxy [(Int,Bool)])
+      "[{_1 : Int, _2 : <False : {}, True : {}>}]"
+    -- or?:
+    -- "[(Int,Bool)]"
+  -- TODO support Char?
+  -- TODO add Text
   , doesNotHaveType (xx :: Proxy Int) "Bool"
+
+  , hasType (xx :: Proxy ()) "{}"
+  , hasType (xx :: Proxy Void) "<>"
+  , hasType (xx :: Proxy (Either () ())) "<Left : {}, Right : {}>"
+  , hasType (xx :: Proxy (Maybe Int)) "<Nothing : {}, Just : Int>"
+  {- , hasType (xx :: Proxy (Map String Bool)) "" -} -- TODO add maps as [{key:k,value:v)]
+  , hasType (xx :: Proxy (Ordering)) "<LT : {}, EQ : {}, GT : {}>"
+  , hasType (xx :: Proxy (Rat)) "<Rat : {nom : Int, denom : Int}, Simple : Int>"
+
+  , hasType (xx :: Proxy ((Int -> Void) -> Double)) "(Int -> <>) -> Double"
   ]
 foreignImportTests = testGroup
   "Foreign import"
-  [
+  [ isValue (1 :: Int) "1"
+  -- TODO use toValue
   ]
 foreignExportTests = testGroup
   "Foreign export"
   [
+  -- hasValue
   ]
 
 xx :: Proxy a
@@ -186,6 +209,13 @@ doesNotHaveType hsTy expected = testCase caseStr $
   where
     actual = show $ ppType $ typeOf hsTy
     caseStr = show hsTy ++ " " ++ show expected
+
+isValue :: ToValue a => a -> String -> TestTree
+isValue hsVal expected = testCase caseStr $
+  assertEqual "" expected actual
+  where
+    actual = show $ ppValue $ toValue hsVal
+    caseStr = expected ++ " == " ++ actual
 
 hasValue :: (Eq a, Show a, FromValue a) => String -> a -> TestTree
 hasValue str expected = testCase str $ do
