@@ -1,9 +1,11 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeSynonymInstances #-}
@@ -32,9 +34,9 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import Control.Applicative ((<$>))
-import Control.Monad.Except
-import Control.Monad.Reader
-import Control.Monad.State
+import Control.Monad.Except hiding (mapM)
+import Control.Monad.Reader hiding (mapM)
+import Control.Monad.State hiding (mapM)
 import Data.Monoid
 
 import Expresso.Syntax
@@ -42,6 +44,11 @@ import Expresso.Type
 import Expresso.Pretty
 import Expresso.Utils
 
+#if __GLASGOW_HASKELL__ <= 708
+import Prelude hiding (mapM, concat)
+import Data.Foldable
+import Data.Traversable
+#endif
 
 data TIState = TIState
     { tiSupply :: Int
@@ -75,7 +82,7 @@ newSkolemTyVar (TyVar _ _ prefix c) = do
 
 newMetaVar :: Pos -> Constraint -> Char -> TI Type
 newMetaVar pos c prefix =
-    annotate pos . TMetaVar <$> newMetaTyVar c prefix
+    annotate pos . _TMetaVar <$> newMetaTyVar c prefix
 
 newMetaTyVar :: Constraint -> Char -> TI MetaTv
 newMetaTyVar c prefix = do
@@ -114,7 +121,7 @@ quantify pos mvs0 t =
                . M.fromListWith (++)
                . map (metaPrefix &&& (:[]))
                $ mvs0
-    s  = mconcat $ zipWith (|->) mvs (map TVar tvs)
+    s  = mconcat $ zipWith (|->) mvs (map _TVar tvs)
     t' = apply s t
 
     -- avoid quantified type variables in use
@@ -132,7 +139,7 @@ quantify pos mvs0 t =
 instantiate :: Pos -> Sigma -> TI Rho
 instantiate pos (TForAll tvs t) = do
   tvs' <- mapM (\v -> newMetaTyVar (tyvarConstraint v) (tyvarPrefix v)) tvs
-  let ts = map (annotate pos . TMetaVar) tvs'
+  let ts = map (annotate pos . _TMetaVar) tvs'
   s <- gets tiSubst
   return $ substTyVar tvs ts (apply s t)
 instantiate _ t = return t
@@ -142,7 +149,7 @@ instantiate _ t = return t
 skolemise :: Pos -> Sigma -> TI ([TyVar], Rho)
 skolemise pos (TForAll tvs t) = do
     sks1  <- mapM newSkolemTyVar tvs
-    let sksTs = map (annotate pos . TVar) sks1
+    let sksTs = map (annotate pos . _TVar) sks1
     t <- substType t
     (sks2, t') <- skolemise pos $ substTyVar tvs sksTs t
     return (sks1 ++ sks2, t')
@@ -180,7 +187,7 @@ mgu TRowEmpty TRowEmpty = return nullSubst
 mgu row1@(TRowExtend label1 fieldTy1 rowTail1) row2@TRowExtend{} = do
   -- apply side-condition to ensure termination
   (fieldTy2, rowTail2, theta1) <- rewriteRow (getAnn row1) (getAnn row2) row2 label1
-  case snd (toList rowTail1) >>= extractMetaTv of
+  case snd (rowToList rowTail1) >>= extractMetaTv of
     Just tv | isInSubst tv theta1 ->
                   throwError $ show (getAnn row1) ++ " : recursive row type"
     _ -> do
@@ -201,7 +208,7 @@ unifyConstraints pos u v
   | otherwise =
       case (metaConstraint u, metaConstraint v) of
        (CNone, CNone) ->
-           return $ u |-> annotate pos (TMetaVar v)
+           return $ u |-> annotate pos (_TMetaVar v)
        (c1, c2) -> do
            let prefix = metaPrefix v
            w <- newMetaVar pos (c1 `unionConstraints` c2) prefix
@@ -214,7 +221,7 @@ varBind :: Pos -> MetaTv -> Type -> TI Subst
 varBind pos u t
   | u `S.member` meta t = throwError $ show $ vcat
         [ "Occur check fails:"
-        , ppPos pos        <+> ppType (TMetaVar u)
+        , ppPos pos        <+> ppType (_TMetaVar u)
         , "occurs in"
         , ppPos (getAnn t) <+> ppType t
         ]
@@ -249,7 +256,7 @@ varBindRow pos u t
                                           <+> sepBy comma (map text labels)
   where
     ls           = labelsFrom u
-    (ls', mv)    = (S.fromList . map fst) *** (>>= extractMetaTv) $ toList t
+    (ls', mv)    = (S.fromList . map fst) *** (>>= extractMetaTv) $ rowToList t
     s1           = u |-> t
     labelsFrom v = case metaConstraint v of
         CRow s -> s
@@ -280,7 +287,7 @@ rewriteRow pos1 pos2 (Fix (TRowExtendF label fieldTy rowTail :*: K pos)) newLabe
              )
   | otherwise   = do
       (fieldTy', rowTail', s) <- rewriteRow pos1 pos2 rowTail newLabel
-      return (fieldTy', TRowExtend label fieldTy rowTail', s)
+      return (fieldTy', _TRowExtend label fieldTy rowTail', s)
 rewriteRow _ _ ty _ = error $ "Unexpected type: " ++ show ty
 
 -- | type-checking and inference
@@ -380,7 +387,7 @@ tcBinds _   (Arg x)       (Just ty) =
 tcBinds pos (RecArg xs)   (Just ty) = do
     tvs <- mapM (const $ newMetaVar pos CNone 'l') xs
     r   <- newMetaVar pos (lacks xs) 'r' -- implicit tail
-    unify ty (TRecord $ mkRowType r $ zip xs tvs)
+    unify ty (_TRecord $ mkRowType r $ zip xs tvs)
     return $ M.fromList $ zip xs tvs
 tcBinds pos RecWildcard   (Just ty) = do
     s <- gets tiSubst
@@ -440,156 +447,156 @@ tcDecl pos b e = do
 
 tcPrim :: Pos -> Prim -> Type
 tcPrim pos prim = annotate pos $ case prim of
-  Int{}                  -> TInt
-  Dbl{}                  -> TDbl
-  Bool{}                 -> TBool
-  Char{}                 -> TChar
-  String{}               -> TList TChar
+  Int{}                  -> _TInt
+  Dbl{}                  -> _TDbl
+  Bool{}                 -> _TBool
+  Char{}                 -> _TChar
+  String{}               -> _TList _TChar
   Show                   ->
     -- use an Eq constraint, to prevent attempting to show lambdas
     let a = newTyVar (CStar CEq) 'a'
-    in TForAll [a] $ TFun (TVar a) (TList TChar)
+    in _TForAll [a] $ _TFun (_TVar a) (_TList _TChar)
   Trace                  ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TFun (TList TChar) (TVar a))
-                                (TVar a)
+    in _TForAll [a] $ _TFun (_TFun (_TList _TChar) (_TVar a))
+                                (_TVar a)
   ErrorPrim              ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TList TChar) (TVar a)
+    in _TForAll [a] $ _TFun (_TList _TChar) (_TVar a)
 
   ArithPrim{}            ->
     binOp  $ newTyVar (CStar CNum) 'a'
   RelPrim{}              ->
     binOpB $ newTyVar (CStar COrd) 'a'
 
-  Not                    -> TFun TBool TBool
-  And                    -> TFun TBool (TFun TBool TBool)
-  Or                     -> TFun TBool (TFun TBool TBool)
+  Not                    -> _TFun _TBool _TBool
+  And                    -> _TFun _TBool (_TFun _TBool _TBool)
+  Or                     -> _TFun _TBool (_TFun _TBool _TBool)
 
   Eq                     -> binOpB $ newTyVar (CStar CEq) 'a'
   NEq                    -> binOpB $ newTyVar (CStar CEq) 'a'
 
-  Double                 -> TFun TInt TDbl
-  Floor                  -> TFun TDbl TInt
-  Ceiling                -> TFun TDbl TInt
+  Double                 -> _TFun _TInt _TDbl
+  Floor                  -> _TFun _TDbl _TInt
+  Ceiling                -> _TFun _TDbl _TInt
   Abs                    ->
       unOp  $ newTyVar (CStar CNum) 'a'
   Neg                    ->
       unOp  $ newTyVar (CStar CNum) 'a'
   Mod                    ->
-    TFun TInt (TFun TInt TInt)
+    _TFun _TInt (_TFun _TInt _TInt)
   FixPrim                ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TFun (TVar a) (TVar a)) (TVar a)
+    in _TForAll [a] $ _TFun (_TFun (_TVar a) (_TVar a)) (_TVar a)
   FwdComp                ->   -- forward composition operator
     let a = newTyVar CNone 'a' -- (a -> b) -> (b -> c) -> a -> c
         b = newTyVar CNone 'b'
         c = newTyVar CNone 'c'
-    in TForAll [a,b,c] $ TFun (TFun (TVar a) (TVar b))
-                                    (TFun (TFun (TVar b) (TVar c))
-                                          (TFun (TVar a) (TVar c)))
+    in _TForAll [a,b,c] $ _TFun (_TFun (_TVar a) (_TVar b))
+                                    (_TFun (_TFun (_TVar b) (_TVar c))
+                                          (_TFun (_TVar a) (_TVar c)))
   BwdComp                ->   -- backward composition operator
     let a = newTyVar CNone 'a' -- (b -> c) -> (a -> b) -> a -> c
         b = newTyVar CNone 'b'
         c = newTyVar CNone 'c'
-    in TForAll [a,b,c] $ TFun (TFun (TVar b) (TVar c))
-                                    (TFun (TFun (TVar a) (TVar b))
-                                          (TFun (TVar a) (TVar c)))
+    in _TForAll [a,b,c] $ _TFun (_TFun (_TVar b) (_TVar c))
+                                    (_TFun (_TFun (_TVar a) (_TVar b))
+                                          (_TFun (_TVar a) (_TVar c)))
   JustPrim               ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TVar a) (TMaybe (TVar a))
+    in _TForAll [a] $ _TFun (_TVar a) (_TMaybe (_TVar a))
   NothingPrim            ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TMaybe (TVar a)
+    in _TForAll [a] $ _TMaybe (_TVar a)
   MaybePrim              ->
     let a = newTyVar CNone 'a'
         b = newTyVar CNone 'b'
-    in TForAll [a,b] $ TFun (TVar b)
-                            (TFun (TFun (TVar a) (TVar b))
-                                  (TFun (TMaybe (TVar a))
-                                        (TVar b)))
+    in _TForAll [a,b] $ _TFun (_TVar b)
+                            (_TFun (_TFun (_TVar a) (_TVar b))
+                                  (_TFun (_TMaybe (_TVar a))
+                                        (_TVar b)))
   Cond                   ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun TBool
-                                (TFun (TVar a)
-                                      (TFun (TVar a) (TVar a)))
+    in _TForAll [a] $ _TFun _TBool
+                                (_TFun (_TVar a)
+                                      (_TFun (_TVar a) (_TVar a)))
   ListEmpty              ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TList (TVar a)
+    in _TForAll [a] $ _TList (_TVar a)
   ListCons               ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TVar a)
-                          (TFun (TList (TVar a))
-                                (TList (TVar a)))
+    in _TForAll [a] $ _TFun (_TVar a)
+                          (_TFun (_TList (_TVar a))
+                                (_TList (_TVar a)))
   ListFoldr              ->
     let a = newTyVar CNone 'a'
         b = newTyVar CNone 'b'
-    in TForAll [a,b] $ TFun (TFun (TVar a) (TFun (TVar b) (TVar b)))
-                            (TFun (TVar b)
-                                  (TFun (TList (TVar a))
-                                        (TVar b)))
+    in _TForAll [a,b] $ _TFun (_TFun (_TVar a) (_TFun (_TVar b) (_TVar b)))
+                            (_TFun (_TVar b)
+                                  (_TFun (_TList (_TVar a))
+                                        (_TVar b)))
   ListNull               ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TList (TVar a)) TBool
+    in _TForAll [a] $ _TFun (_TList (_TVar a)) _TBool
   ListAppend             ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TList (TVar a))
-                          (TFun (TList (TVar a))
-                                (TList (TVar a))) -- TODO
-  RecordEmpty            -> TRecord TRowEmpty
+    in _TForAll [a] $ _TFun (_TList (_TVar a))
+                          (_TFun (_TList (_TVar a))
+                                (_TList (_TVar a))) -- TODO
+  RecordEmpty            -> _TRecord _TRowEmpty
   (RecordSelect label)   ->
     let a = newTyVar CNone 'a'
         r = newTyVar (lacks [label]) 'r'
-    in TForAll [a,r] $
-        TFun (TRecord $ TRowExtend label (TVar a) (TVar r)) (TVar a)
+    in _TForAll [a,r] $
+        _TFun (_TRecord $ _TRowExtend label (_TVar a) (_TVar r)) (_TVar a)
   (RecordExtend label)   ->
     let a = newTyVar CNone 'a'
         r = newTyVar (lacks [label]) 'r'
-    in TForAll [a,r] $
-        TFun (TVar a)
-             (TFun (TRecord (TVar r))
-                   (TRecord $ TRowExtend label (TVar a) (TVar r)))
+    in _TForAll [a,r] $
+        _TFun (_TVar a)
+             (_TFun (_TRecord (_TVar r))
+                   (_TRecord $ _TRowExtend label (_TVar a) (_TVar r)))
   (RecordRestrict label) ->
     let a = newTyVar CNone 'a'
         r = newTyVar (lacks [label]) 'r'
-    in TForAll [a,r] $
-        TFun (TRecord $ TRowExtend label (TVar a) (TVar r))
-             (TRecord (TVar r))
+    in _TForAll [a,r] $
+        _TFun (_TRecord $ _TRowExtend label (_TVar a) (_TVar r))
+             (_TRecord (_TVar r))
   Absurd                 ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TVariant TRowEmpty) (TVar a)
+    in _TForAll [a] $ _TFun (_TVariant _TRowEmpty) (_TVar a)
   (VariantInject label)  ->  -- dual of record select
     let a = newTyVar CNone 'a'
         r = newTyVar (lacks [label]) 'r'
-    in TForAll [a, r] $
-        TFun (TVar a)
-             (TVariant $ TRowExtend label (TVar a) (TVar r))
+    in _TForAll [a, r] $
+        _TFun (_TVar a)
+             (_TVariant $ _TRowExtend label (_TVar a) (_TVar r))
            -- a -> <l:a|r>
   (VariantEmbed label)   ->  -- dual of record restrict
     let a = newTyVar CNone 'a'
         r = newTyVar (lacks [label]) 'r'
-    in TForAll [a, r] $
-        TFun (TVariant (TVar r))
-             (TVariant $ TRowExtend label (TVar a) (TVar r))
+    in _TForAll [a, r] $
+        _TFun (_TVariant (_TVar r))
+             (_TVariant $ _TRowExtend label (_TVar a) (_TVar r))
            -- <r> -> <l:a|r>
   (VariantElim label)    ->
     let a = newTyVar CNone 'a'
         b = newTyVar CNone 'b'
         r = newTyVar (lacks [label]) 'r'
-    in TForAll [a, b, r] $
-        TFun (TFun (TVar a) (TVar b))
-             (TFun (TFun (TVariant (TVar r)) (TVar b))
-                   (TFun (TVariant $ TRowExtend label (TVar a) (TVar r))
-                         (TVar b)))
+    in _TForAll [a, b, r] $
+        _TFun (_TFun (_TVar a) (_TVar b))
+             (_TFun (_TFun (_TVariant (_TVar r)) (_TVar b))
+                   (_TFun (_TVariant $ _TRowExtend label (_TVar a) (_TVar r))
+                         (_TVar b)))
                   --  (a -> b) -> (<r> -> b) -> <l:a|r> -> b
 
   where
-    binOpB tv = TForAll [tv] $ TFun ty (TFun ty TBool)
-      where ty = TVar tv
-    binOp tv  = TForAll [tv] $ TFun ty (TFun ty ty)
-      where ty = TVar tv
-    unOp tv   = TForAll [tv] $ TFun ty ty
-      where ty = TVar tv
+    binOpB tv = _TForAll [tv] $ _TFun ty (_TFun ty _TBool)
+      where ty = _TVar tv
+    binOp tv  = _TForAll [tv] $ _TFun ty (_TFun ty ty)
+      where ty = _TVar tv
+    unOp tv   = _TForAll [tv] $ _TFun ty ty
+      where ty = _TVar tv
 
 typeCheck :: Exp -> TI Sigma
 typeCheck e = tcRho e Nothing >>= inferSigma (getAnn e)

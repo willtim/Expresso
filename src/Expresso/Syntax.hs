@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -14,6 +15,11 @@ module Expresso.Syntax where
 
 import Expresso.Type
 import Expresso.Utils
+
+#if __GLASGOW_HASKELL__ <= 708
+import Data.Foldable
+import Data.Traversable
+#endif
 
 type ExpI  = Fix ((ExpF Name Bind Type :+: K Import) :*: K Pos)
 type Exp   = Fix (ExpF Name Bind Type :*: K Pos)

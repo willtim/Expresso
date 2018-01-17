@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
 {-# LANGUAGE TupleSections #-}
 
 ------------------------------------------------------------
@@ -25,6 +26,8 @@ module Expresso
 
 import Control.Monad ((>=>))
 import Control.Monad.Except (ExceptT(..), runExceptT, throwError)
+import Data.Monoid
+import Control.Applicative
 
 import Expresso.Eval (Env, EvalM, FromValue(..), Value(..), runEvalM)
 import Expresso.TypeCheck (TIState, initTIState)

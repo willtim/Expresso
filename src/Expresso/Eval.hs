@@ -1,3 +1,8 @@
+{-# OPTIONS_GHC -fno-warn-unused-imports #-}
+{-# OPTIONS_GHC -fno-warn-unused-binds #-}
+
+{-# LANGUAGE CPP #-}
+{-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE DataKinds #-}
@@ -42,7 +47,8 @@ module Expresso.Eval(
 )
 where
 
-import Control.Monad.Except
+import Control.Monad.Except hiding (mapM)
+import Control.Applicative
 import Data.Foldable (foldrM)
 import Data.HashMap.Strict (HashMap)
 import Data.Coerce
@@ -64,8 +70,14 @@ import Expresso.Syntax
 import Expresso.Type
 import Expresso.Pretty
 import Expresso.Utils (cata, (:*:)(..), K(..))
-{- import qualified Expresso.InferType as Infer -}
 import qualified Expresso.Parser as Parser
+
+#if __GLASGOW_HASKELL__ <= 708
+import Prelude hiding (mapM, concat, elem, and)
+import Data.Foldable
+import Data.Traversable
+#endif
+
 
 import Debug.Trace
 
@@ -81,7 +93,9 @@ deriving instance MonadError String EvalM
 
 newtype Thunk = Thunk { force_ :: EvalM Value }
 
-class MonadError String f => MonadEval f where
+type ApplicativeMonadError e f = (Applicative f, MonadError e f)
+
+class ApplicativeMonadError String f => MonadEval f where
   force :: Thunk -> f Value
 instance MonadEval EvalM where
   force = force_
@@ -487,6 +501,14 @@ class ToValue a where
 class GToValue f where
     gtoValue :: Options -> f x -> Value
 
+-- | Haskell types whose values can be represented by Expresso values.
+class FromValue a where
+    fromValue :: MonadEval f => Value -> f a
+    default fromValue :: (G.Generic a, GFromValue (G.Rep a), MonadEval f) => Value -> f a
+    fromValue x = G.to <$> gfromValue defaultOptions x
+class GFromValue g where
+    gfromValue :: MonadEval f => Options -> Value -> f (g x)
+
 -- | This thing is passed around when traversing generic representations of Haskell types to keep track
 -- of the surrounding context. We need this to properly decompose Haskell ADTs with >2 constructors into
 -- proper (right-associative) rows. For records we also keep track of the number of elements, so we
@@ -507,11 +529,11 @@ instance GHasType f => GHasType (G.D1 c f) where
     gtypeOf opts ct = gtypeOf opts ct . fmap G.unM1
 
 instance GHasType (G.U1) where
-    gtypeOf opts Rec{} _  = pure $ TRowEmpty
-    gtypeOf opts _ _    = pure $ TRecord $ TRowEmpty
+    gtypeOf opts Rec{} _  = pure $ _TRowEmpty
+    gtypeOf opts _ _    = pure $ _TRecord $ _TRowEmpty
 instance GHasType (G.V1) where
-    gtypeOf opts Var _ = pure $ TRowEmpty
-    gtypeOf opts _ _   = pure $ TVariant $ TRowEmpty
+    gtypeOf opts Var _ = pure $ _TRowEmpty
+    gtypeOf opts _ _   = pure $ _TVariant $ _TRowEmpty
 
 -- FIXME this allows infinite types to be generated
 -- Can we forbid recursive Haskell types altogether?
@@ -524,11 +546,11 @@ instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where
       (Nothing, lType) -> error "GHasType (f G.:+: g): should not happen"
       (Just lLabel, lType) ->
         case gtypeOf opts Var (rightP proxy) of
-          (Just rLabel, rType) -> pure $ tag ct (TRowExtend lLabel lType (TRowExtend rLabel rType TRowEmpty))
-          (Nothing, rType) ->     pure $ tag ct (TRowExtend lLabel lType rType)
+          (Just rLabel, rType) -> pure $ tag ct (_TRowExtend lLabel lType (_TRowExtend rLabel rType _TRowEmpty))
+          (Nothing, rType) ->     pure $ tag ct (_TRowExtend lLabel lType rType)
     where
       tag Var = id
-      tag ct  = TVariant
+      tag ct  = _TVariant
 
 instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
   gtypeOf opts ct proxy =
@@ -536,8 +558,8 @@ instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
       (Nothing, lType) -> error "GHasType (f G.:*: g): should not happen"
       (Just lLabel, lType) ->
         case gtypeOf opts (Rec $ succ $ used) (rightP proxy) of
-          (Just rLabel, rType) -> pure $ tag ct (TRowExtend (fl lLabel) lType (TRowExtend (fr rLabel) rType TRowEmpty))
-          (Nothing, rType) ->     pure $ tag ct (TRowExtend (fl lLabel) lType rType)
+          (Just rLabel, rType) -> pure $ tag ct (_TRowExtend (fl lLabel) lType (_TRowExtend (fr rLabel) rType _TRowEmpty))
+          (Nothing, rType) ->     pure $ tag ct (_TRowExtend (fl lLabel) lType rType)
     where
       fl "" = "_" ++ show (used + 1)
       fl x  = x
@@ -548,7 +570,7 @@ instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
         (Rec n) -> n
         _ -> 0
       tag Rec{} = id
-      tag ct    = TRecord
+      tag ct    = _TRecord
     --
     -- gtypeOf opts ct proxy = pure $ TRecord (TRowExtend lLabel lType (TRowExtend rLabel rType TRowEmpty))
     --   where
@@ -569,25 +591,41 @@ rightP _ = Proxy
 
 
 instance GToValue f => GToValue (G.D1 c f) where
+  gtoValue opts (G.M1 x) = gtoValue opts x
 instance GToValue f => GToValue (G.C1 c f) where
+  gtoValue opts (G.M1 x) = gtoValue opts x
 instance GToValue f => GToValue (G.S1 c f) where
+  gtoValue opts (G.M1 x) = gtoValue opts x
 instance GToValue (G.K1 t c) where
+  gtoValue = error "TODO"
 instance (GToValue f, GToValue g) => GToValue (f G.:+: g) where
+  gtoValue = error "TODO"
 instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
+  gtoValue = error "TODO"
+
+instance GFromValue f => GFromValue (G.D1 c f) where
+  gfromValue = error "TODO"
+instance GFromValue f => GFromValue (G.C1 c f) where
+  gfromValue = error "TODO"
+instance GFromValue f => GFromValue (G.S1 c f) where
+  gfromValue = error "TODO"
+instance GFromValue (G.K1 t c) where
+  gfromValue = error "TODO"
+instance (GFromValue f, GFromValue g) => GFromValue (f G.:+: g) where
+  gfromValue = error "TODO"
+instance (GFromValue f, GFromValue g) => GFromValue (f G.:*: g) where
+  gfromValue = error "TODO"
 
 
--- | Haskell types whose values can be represented by Expresso values.
-class FromValue a where
-    fromValue :: MonadEval f => Value -> f a
 
 instance HasType Integer where
-    typeOfWith _ _ _ = pure $ TInt
+    typeOfWith _ _ _ = pure $ _TInt
 instance HasType Double where
-    typeOfWith _ _ _ = pure $ TDbl
+    typeOfWith _ _ _ = pure $ _TDbl
 instance HasType Char where
-    typeOfWith _ _ _ = pure $ TChar
+    typeOfWith _ _ _ = pure $ _TChar
 instance (HasType a, HasType b) => HasType (a -> b) where
-    typeOfWith opts ct p = TFun <$> (typeOfWith opts ct $ dom p) <*> (typeOfWith opts ct $ inside p)
+    typeOfWith opts ct p = _TFun <$> (typeOfWith opts ct $ dom p) <*> (typeOfWith opts ct $ inside p)
 instance HasType Void
 instance HasType ()
 instance HasType Bool
@@ -598,11 +636,11 @@ instance (HasType a, HasType b) => HasType (a, b)
 -- instance (HasType a, HasType b, HasType c) => HasType (a, b, c)
 -- instance ToValue a => ToValue (Maybe a)
 instance HasType a => HasType [a] where
-    typeOfWith opts ct p = TList <$> typeOfWith opts ct (inside p)
+    typeOfWith opts ct p = _TList <$> typeOfWith opts ct (inside p)
 -- instance HasType Void where
---     typeOf p = TVariant TRowEmpty
+--     typeOf p = _TVariant _TRowEmpty
 -- instance HasType () where
---     typeOf p = TRecord TRowEmpty
+--     typeOf p = _TRecord _TRowEmpty
 
 
 -- FIXME move
@@ -656,7 +694,9 @@ instance FromValue a => FromValue (Maybe a) where
     fromValue (VMaybe m) = mapM fromValue m
     fromValue v          = failfromValue "VMaybe" v
 
-instance {-# OVERLAPS #-} FromValue String where
+instance
+--  {-# OVERLAPS #-}
+  FromValue String where
     fromValue (VString s) = return s
     fromValue v           = failfromValue "VString" v
 
@@ -670,12 +710,15 @@ instance (ToValue a, FromValue b) => FromValue (a -> b) where
       x <- (mkThunk $ pure $ toValue x)
       r <- f x
       fromValue r
+    fromValue v           = failfromValue "VLam" v
 
 -- TODO Questionable...
 instance FromValue Value where
     fromValue v        = return v
 
-instance {-# OVERLAPS #-} FromValue [Value] where
+instance
+--  {-# OVERLAPS #-}
+  FromValue [Value] where
     fromValue (VList xs)  = return xs
     fromValue (VString s) = return $ map VChar s
     fromValue v           = failfromValue "VList" v
@@ -684,14 +727,20 @@ instance FromValue a => FromValue (HashMap Name a) where
     fromValue (VRecord m) = mapM fromValue' m
     fromValue v           = failfromValue "VRecord" v
 
-instance {-# OVERLAPS #-} FromValue a => FromValue [(Name, a)] where
+instance
+--  {-# OVERLAPS #-}
+  FromValue a => FromValue [(Name, a)] where
     fromValue v             = HashMap.toList <$> fromValue v
 
-instance {-# OVERLAPS #-} FromValue (HashMap Name Thunk) where
+instance
+--  {-# OVERLAPS #-}
+  FromValue (HashMap Name Thunk) where
     fromValue (VRecord m) = return m
     fromValue v           = failfromValue "VRecord" v
 
-instance {-# OVERLAPS #-} FromValue [(Name, Thunk)] where
+instance
+--  {-# OVERLAPS #-}
+  FromValue [(Name, Thunk)] where
     fromValue v           = HashMap.toList <$> fromValue v
 
 failfromValue :: MonadError String f => String -> Value -> f a
