@@ -146,7 +146,7 @@ rankNTests = testGroup
   , hasValue
          "let k = \\f g x -> f (g x) in let t = k (\\{} -> True) (\\x -> {}) False in let xx = k (\\a -> {}) (\\x -> {}) in t" True
 
-  {- -- FIXME -}
+  -- FIXME breaks due to parser bug
   {- , hasValue -}
          {- "let f = (\\g -> {l = g True, r = g 1}) ::: ((forall a. a -> a) -> {l : Bool, r : Int }) in f (\\x -> x) == {l = True, r = 1}" True -}
   {- , hasValue -}

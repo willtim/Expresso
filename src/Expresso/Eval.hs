@@ -599,16 +599,30 @@ rightP _ = Proxy
 
 instance GToValue f => GToValue (G.D1 c f) where
   gtoValue opts (G.M1 x) = gtoValue opts x
+
 instance GToValue f => GToValue (G.C1 c f) where
   gtoValue opts (G.M1 x) = gtoValue opts x
+
 instance GToValue f => GToValue (G.S1 c f) where
   gtoValue opts (G.M1 x) = gtoValue opts x
+
+instance GToValue G.U1 where
+  gtoValue = error "TODO"
+
+instance GToValue G.V1 where
+  gtoValue = error "TODO"
+
 instance GToValue (G.K1 t c) where
   gtoValue = error "TODO"
+
 instance (GToValue f, GToValue g) => GToValue (f G.:+: g) where
   gtoValue = error "TODO"
+
 instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
   gtoValue = error "TODO"
+
+
+
 
 instance GFromValue f => GFromValue (G.D1 c f) where
   gfromValue = error "TODO"
@@ -617,6 +631,10 @@ instance GFromValue f => GFromValue (G.C1 c f) where
 instance GFromValue f => GFromValue (G.S1 c f) where
   gfromValue = error "TODO"
 instance GFromValue (G.K1 t c) where
+  gfromValue = error "TODO"
+instance GFromValue G.U1 where
+  gfromValue = error "TODO"
+instance GFromValue G.V1 where
   gfromValue = error "TODO"
 instance (GFromValue f, GFromValue g) => GFromValue (f G.:+: g) where
   gfromValue = error "TODO"
@@ -698,17 +716,19 @@ instance FromValue Double where
     fromValue v        = failfromValue "VDbl" v
 
 -- TODO derive
-instance FromValue Bool where
-    fromValue (VBool b) = return b
-    fromValue v         = failfromValue "VBool" v
+instance FromValue Bool
+{- instance FromValue Bool where -}
+    {- fromValue (VBool b) = return b -}
+    {- fromValue v         = failfromValue "VBool" v -}
 
 instance FromValue Char where
     fromValue (VChar c) = return c
     fromValue v         = failfromValue "VChar" v
 
-instance FromValue a => FromValue (Maybe a) where
-    fromValue (VMaybe m) = mapM fromValue m
-    fromValue v          = failfromValue "VMaybe" v
+instance FromValue a => FromValue (Maybe a)
+{- instance FromValue a => FromValue (Maybe a) where -}
+    {- fromValue (VMaybe m) = mapM fromValue m -}
+    {- fromValue v          = failfromValue "VMaybe" v -}
 
 instance
 --  {-# OVERLAPS #-}
@@ -736,143 +756,20 @@ instance (ToValue a, FromValue b) => FromValue (a -> b) where
       fromValue r
     fromValue v           = failfromValue "VLam" v
 
--- TODO Questionable...
-{- instance FromValue Value where -}
-    {- fromValue v        = return v -}
-
-{- instance -}
-{- --  {-# OVERLAPS #-} -}
-  {- FromValue [Value] where -}
-    {- fromValue (VList xs)  = return xs -}
-    {- fromValue (VString s) = return $ map VChar s -}
-    {- fromValue v           = failfromValue "VList" v -}
 
 -- | A record where all fields have the same type.
 instance HasType a => HasType (HashMap Name a) where
-    typeOfWith = error "Impossible: TODO rewrite tests to use real HS records instead of faking it"
+    typeOfWith = error "Impossible: FIXME rewrite tests to use real HS records instead of faking it"
 instance FromValue a => FromValue (HashMap Name a) where
     fromValue (VRecord m) = mapM fromValue' m
     fromValue v           = failfromValue "VRecord" v
 
-{- instance -}
-{- --  {-# OVERLAPS #-} -}
-  {- FromValue a => FromValue [(Name, a)] where -}
-    {- fromValue v             = HashMap.toList <$> fromValue v -}
-
-{- instance -}
-{- --  {-# OVERLAPS #-} -}
-  {- FromValue (HashMap Name Thunk) where -}
-    {- fromValue (VRecord m) = return m -}
-    {- fromValue v           = failfromValue "VRecord" v -}
 
 fromValueRTh (VRecord m) = return m
 fromValueRTh v           = failfromValue "VRecord" v
-
-{- instance -}
-{- --  {-# OVERLAPS #-} -}
-  {- FromValue [(Name, Thunk)] where -}
-    {- fromValue v           = HashMap.toList <$> fromValue v -}
 
 failfromValue :: MonadError String f => String -> Value -> f a
 failfromValue desc v = throwError $ "Expected a " ++ desc ++
     ", but got: " ++ show (ppValue v)
 
 
-
--- data N = Z | S N
--- type family +
-
--- instance Data x Void
--- instance Data x ()
-
-
--- type family Data (f :: k) :: Nat where
-  -- Data
--- instance GData n (G.Rep a) => Data n a
-
--- type family GData (f :: k1 -> k) :: Nat where
---   GData (G.K1 G.R a) = GData (G.Rep a) + 1
---   GData (G.U1) = 0
---   GData (G.V1) = 0
---   GData (G.C1 c f) = GData f
---   GData (G.D1 c f) = GData f
---   GData (G.S1 c f) = GData f
---   GData (f G.:*: g) = GData f + GData g
---   GData (f G.:+: g) = GData f + GData g
---
--- type Data a = GData (G.Rep a)
--- class KnownNat (Data a) => IsData a where
--- instance IsData ()
--- instance IsData Void
--- -- instance IsData a => IsData (Foo a)
--- instance IsData a => IsData (Maybe a)
-
--- type instance GData (n + 1) (G.Rep a) => GData (G.K1 G.R a) +
--- type instance GData 0 (G.U1)
--- type instance GData 0 (G.V1)
--- type instance (GData n f) => GData n (G.M1 G.C c f) where
--- type instance GData n f => GData n (G.D1 c f) where
--- type instance (GData n f) => GData n (G.S1 c f) where
--- type instance (GData m f, GData n g) => GData m (f G.:*: g) where
--- instance (GData m f, GData n g) => GData (m + n) (f G.:+: g) where
--- instance (GData m f, GData n g) => GData (m + n) (f G.:+: g) where
-
-
--- module IsRecursive where
---
--- import GHC.Generics
--- import Data.Proxy
---
--- type family (:||) (a :: Bool) (b :: Bool) :: Bool where
---   True  :|| False = True
---   True  :|| True  = True
---   False :|| True = True
---   False :|| False = False
--- type family (:&&) (a :: Bool) (b :: Bool) :: Bool where
---   True :&& True = True
---   a :&& b = False
--- type family Not (a :: Bool) :: Bool where
---   Not True = False
---   Not False = True
--- data T2 a b
---
--- type family Elem (x :: k) (xs :: [k]) :: Bool where
---   Elem x '[] = False
---   Elem x (x ': xs) = True
---   Elem x (y ': xs) = Elem x xs
---
--- class IsRecursive' (tys :: [* -> *]) (rep :: * -> *) (r :: *) | tys rep -> r where
---   isRecursive' :: Proxy tys -> Proxy rep -> Proxy r
---   isRecursive' _ _ = Proxy
---
--- -- These types have recursive `Rep`s but aren't recursive because there is no `Rep` for primitive types
--- instance IsRecursive' tys (G.K1 G.R Int)    (T2 False tys)
--- instance IsRecursive' tys (G.K1 G.R Double) (T2 False tys)
--- instance IsRecursive' tys (G.K1 G.R Char)   (T2 False tys)
--- instance IsRecursive' tys (G.K1 G.R Float)  (T2 False tys)
---
--- -- Recursive instances - unwrap one layer of `Rep` and look inside
--- instance IsRecursive' tys G.V1 (T2 False tys)
--- instance IsRecursive' tys G.U1 (T2 False tys)
--- instance IsRecursive' tys (G.Rep c) r => IsRecursive' tys (G.K1 i c) r
--- instance (IsRecursive' tys f (T2 r0 tys0), IsRecursive' tys g (T2 r1 tys1), r2 ~ (r0 :|| r1)) => IsRecursive' tys (f G.:+: g) (T2 r2 tys1)
--- instance (IsRecursive' tys f (T2 r0 tys0), IsRecursive' tys g (T2 r1 tys1), r2 ~ (r0 :|| r1)) => IsRecursive' tys (f G.:*: g) (T2 r2 tys1)
--- instance (IsRecursive' tys f r) => IsRecursive' tys (G.M1 i c f) r
---
--- -- This is where the magic happens
--- -- Datatype declaration reps are represented as `M1 D`
--- -- When one is encountered, save it in the list so far and continue recursion
--- instance (IsRecDataDec (Elem tyrep tys) tyrep tys f r, tyrep ~ (G.M1 G.D c f)) => IsRecursive' tys (G.M1 G.D c f) r
---
--- -- Context reduction is strict, so this class makes sure we
--- -- only recurse if `Elem tyrep tys == False`; otherwise every recursive type
--- -- would cause a stack overflow
--- class IsRecDataDec (b :: Bool) (c :: * -> *) (tys :: [* -> *]) (f :: * -> *) (r :: *) | b c tys f -> r
--- instance IsRecDataDec True c tys f (T2 True (c ': tys))
--- instance IsRecursive' (c ': tys) f r => IsRecDataDec False c tys f r
---
--- class IsRecursive t
--- instance IsRecursive' '[] (G.Rep t) (T2 True tys) => IsRecursive t
---
--- class IsNonRecursive t
--- instance IsRecursive' '[] (G.Rep t) (T2 False tys) => IsNonRecursive t
