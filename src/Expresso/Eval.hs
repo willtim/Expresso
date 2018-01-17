@@ -46,6 +46,8 @@ module Expresso.Eval(
   , bind
   -- * Foreign
   , typeOf
+  , toValue
+  , fromValue
   , HasType(..)
   , FromValue(..)
   , ToValue(..)
@@ -136,8 +138,8 @@ data Value
 {- applyV :: Value -> Value -> EvalM Value -}
 {- applyV (VLam f) x = f (valueToThunk x) -}
   {- where -}
-    {- valueToThunk :: Value -> Thunk -}
-    {- valueToThunk = Thunk . pure -}
+valueToThunk :: Value -> Thunk
+valueToThunk = Thunk . pure
 {- applyV f x = throwError $ "Not a function: " -- TODO ++ show f -}
 
 -- | This does *not* evaluate deeply
@@ -516,13 +518,16 @@ class GHasType f where
     -- the outer level, so we can translate e.g. (Maybe a) as <Nothing, Just: a>
     gtypeOf :: Options -> Ctx -> Proxy (f x) -> (Maybe String, Type)
 
+toValue :: ToValue a => a -> Value
+toValue = toValueWith defaultOptions NoCtx
+
 -- | Haskell types whose values can be converted to Expresso values.
 class HasType a => ToValue a where
-    toValue :: a -> Value
-    default toValue :: (G.Generic a, GToValue (G.Rep a)) => a -> Value
-    toValue = gtoValue defaultOptions . G.from
-class GToValue f where
-    gtoValue :: Options -> f x -> Value
+    toValueWith :: Options -> Ctx -> a -> Value
+    default toValueWith :: (G.Generic a, GToValue (G.Rep a)) => Options -> Ctx -> a -> Value
+    toValueWith opts ct = gtoValue opts ct . G.from
+class GHasType f => GToValue f where
+    gtoValue :: Options -> Ctx -> f x -> Value
 
 -- | Haskell types whose values can be represented by Expresso values.
 class HasType a => FromValue a where
@@ -566,6 +571,7 @@ instance HasType c => GHasType (G.K1 t c) where
 instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where
   gtypeOf opts ct proxy =
     case gtypeOf opts NoCtx (leftP proxy) of
+      -- Nothing is impossible, as we know the left branch will be a constructor (so the C1 instance is used)
       (Nothing, lType) -> error "GHasType (f G.:+: g): should not happen"
       (Just lLabel, lType) ->
         case gtypeOf opts Var (rightP proxy) of
@@ -580,6 +586,7 @@ instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where
 instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
   gtypeOf opts ct proxy =
     case gtypeOf opts NoCtx (leftP proxy) of
+      -- Nothing is impossible, as we know the left branch will be a selector (so the S1 instance is used)
       (Nothing, lType) -> error "GHasType (f G.:*: g): should not happen"
       (Just lLabel, lType) ->
         case gtypeOf opts (Rec $ succ $ used) (rightP proxy) of
@@ -610,30 +617,49 @@ rightP _ = Proxy
 
 
 instance GToValue f => GToValue (G.D1 c f) where
-  gtoValue opts (G.M1 x) = gtoValue opts x
+  gtoValue opts ct (G.M1 x) = gtoValue opts ct x
 
-instance GToValue f => GToValue (G.C1 c f) where
-  gtoValue opts (G.M1 x) = gtoValue opts x
+instance (GToValue f, G.Constructor c) => GToValue (G.C1 c f) where
+  gtoValue opts ct (G.M1 x) = gtoValue opts ct x
 
-instance GToValue f => GToValue (G.S1 c f) where
-  gtoValue opts (G.M1 x) = gtoValue opts x
+instance (GToValue f, G.Selector c) => GToValue (G.S1 c f) where
+  gtoValue opts ct (G.M1 x) = gtoValue opts ct x
 
 instance GToValue G.U1 where
-  gtoValue opts _ = VRecord mempty
+  gtoValue opts ct _ = VRecord mempty
 
 instance GToValue G.V1 where
   gtoValue = error "absurd"
 
-instance GToValue (G.K1 t c) where
-  gtoValue = error "TODO"
+instance ToValue c => GToValue (G.K1 t c) where
+  gtoValue opts ct v = toValueWith opts NoCtx (G.unK1 v)
 
 instance (GToValue f, GToValue g) => GToValue (f G.:+: g) where
   gtoValue = error "TODO"
 
+-- TODO get tag from underlying value...
 instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
-  gtoValue = error "TODO"
+  gtoValue opts ct (l G.:*: r) =
+    case valueToThunk $ gtoValue opts NoCtx l of
+      lv -> case gtoValue opts (Rec $ succ $ used) r of
+        -- TODO get labels..
+        -- FIXME this record case depends on context...
+        VRecord rv -> VRecord (HashMap.singleton "fox" lv <> rv)
+        v          -> VRecord (HashMap.fromList [("foo", lv), ("bar", valueToThunk v)])
+        {- v -> error $ "Expected VRecord, got " ++ show (ppValue v) -}
+    where
+      used = case ct of
+        (Rec n) -> n
+        _ -> 0
 
 
+-- TODO for testing...
+data P a b = P { a :: a, b :: b } deriving (G.Generic)
+instance (HasType a, HasType b) => HasType (P a b)
+instance (ToValue a, ToValue b) => ToValue (P a b)
+data T a b c = T { x :: a, y :: b, z :: c } deriving (G.Generic)
+instance (HasType a, HasType b, HasType c) => HasType (T a b c)
+instance (ToValue a, ToValue b, ToValue c) => ToValue (T a b c)
 
 
 instance GFromValue f => GFromValue (G.D1 c f) where
@@ -643,9 +669,9 @@ instance GFromValue f => GFromValue (G.C1 c f) where
 instance GFromValue f => GFromValue (G.S1 c f) where
   gfromValue = error "TODO"
 instance GFromValue (G.K1 t c) where
-  gfromValue = error "TODO"
+  gfromValue opts = error "absurd"
 instance GFromValue G.U1 where
-  gfromValue = error "TODO"
+  gfromValue opts _ = pure G.U1
 instance GFromValue G.V1 where
   gfromValue = error "TODO"
 instance (GFromValue f, GFromValue g) => GFromValue (f G.:+: g) where
@@ -707,15 +733,15 @@ codom = inside
 instance ToValue ()
 instance ToValue Void
 instance ToValue Integer where
-    toValue = VInt
+    toValueWith _ _ = VInt
 instance ToValue Int where
-    toValue = VInt . fromIntegral
+    toValueWith _ _ = VInt . fromIntegral
 instance ToValue Double where
-    toValue = VDbl
+    toValueWith _ _ = VDbl
 instance ToValue Char where
-    toValue = VChar
+    toValueWith _ _ = VChar
 instance ToValue a => ToValue [a] where
-    toValue = VList . fmap toValue
+    toValueWith _ _ = VList . fmap toValue
 
 instance FromValue Integer where
     fromValue (VInt i) = return i
