@@ -1,4 +1,5 @@
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 module Expresso.Parser where
@@ -7,13 +8,16 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Except
 import Data.Maybe
+import Data.Monoid
 import Text.Parsec hiding (many, optional, parse, (<|>))
 import Text.Parsec.Language (emptyDef)
 import qualified Data.Map as M
+import qualified Data.Set as S
 import qualified Text.Parsec as P
 import qualified Text.Parsec.Expr as P
 import qualified Text.Parsec.Token as P
 
+import Expresso.Pretty (Doc, (<+>), render, parensList, text, dquotes, vcat)
 import Expresso.Syntax
 import Expresso.Type
 import Expresso.Utils
@@ -37,7 +41,7 @@ parse src = showError . P.parse (whiteSpace *> pExp <* P.eof) src
 pExp     = addTypeAnnot
        <$> getPosition
        <*> pExp'
-       <*> optional (reservedOp ":" *> pType)
+       <*> optional (reservedOp ":" *> pTypeAnn)
 
 addTypeAnnot pos e (Just t) = withPos pos (EAnn e t)
 addTypeAnnot _   e Nothing  = e
@@ -76,13 +80,13 @@ pAnnLam  = mkAnnLam
        <*> pExp'
        <?> "lambda expression with type annotated argument"
 
-pAnnBind = parens $ (,) <$> pBind <*> (reservedOp ":" *> pType)
+pAnnBind = parens $ (,) <$> pBind <*> (reservedOp ":" *> pTypeAnn)
 
 pAtom    = pPrim <|> try pVar <|> parens (pSection <|> pExp)
 
 pSection = pSigSection
 
-pSigSection = mkSigSection <$> getPosition <*> (reservedOp ":" *> pType)
+pSigSection = mkSigSection <$> getPosition <*> (reservedOp ":" *> pTypeAnn)
 
 pVar     = mkVar <$> getPosition <*> identifier
 
@@ -367,6 +371,10 @@ withPos pos = withAnn pos . InL
 ------------------------------------------------------------
 -- Parsers for type annotations
 
+pTypeAnn = pType'e >>= either (fail . render) return
+  where
+    pType'e = unboundTyVarCheck <$> getPosition <*> pType
+
 pType = pTForAll
     <|> pTFun
     <|> pType'
@@ -382,7 +390,9 @@ pType' = pTVar
      <|> pTMaybe
      <|> parens pType
 
-pTForAll = mkTForAll
+pTForAll = pTForAll'e >>= either (fail . render) return
+  where
+    pTForAll'e = mkTForAll
         <$> getPosition
         <*> (reserved "forall" *> many1 pTyVar <* dot)
         <*> option [] (try pConstraints)
@@ -408,15 +418,34 @@ pRowConstraint = (,)
              <$> (lowerIdentifier <* reservedOp "\\")
              <*> (lacks . (:[]) <$> identifier)
 
-mkTForAll :: Pos -> [TyVar] -> [(Name, Constraint)] -> Type -> Type
-mkTForAll pos tvs (M.fromListWith unionConstraints -> m) t =
-    withAnn pos (TForAllF tvs' t')
+-- simple syntactic check for unbound type variables in type annotations
+unboundTyVarCheck :: Pos -> Type -> Either Doc Type
+unboundTyVarCheck pos t
+    | not (null freeVars) = Left $ vcat
+          [ ppPos pos <> ":"
+          , "unbound type variable(s)" <+> parensList (map ppTyVarName freeVars) <+> "in type annotation."
+          ]
+    | otherwise           = return t
+  where
+    freeVars    = S.toList $ S.delete "_" (S.map tyvarName $ ftv t)
+    ppTyVarName = dquotes . text
+
+-- match up constraints and bound type variables
+mkTForAll :: Pos -> [TyVar] -> [(Name, Constraint)] -> Type -> Either Doc Type
+mkTForAll pos tvs (M.fromListWith unionConstraints -> m) t
+    | not (null badNames) = Left $ vcat
+          [ ppPos pos <> ":"
+          , "constraint(s) reference unknown type variable(s):" <+> parensList (map (dquotes . text) badNames)
+          ]
+    | otherwise = return $ withAnn pos (TForAllF tvs' t')
   where
     t' = substTyVar tvs (map (withAnn pos . TVarF) tvs') t
     tvs' = [ maybe tv (setConstraint tv) $ M.lookup (tyvarName tv) m
            | tv <- tvs
            ]
     setConstraint tv c = tv { tyvarConstraint = c }
+    bndrs     = S.map tyvarName $ tyVarBndrs t'
+    badNames  = S.toList $ M.keysSet m  S.\\ bndrs
 
 pTVar = (\pos -> withAnn pos . TVarF)
     <$> getPosition
@@ -442,12 +471,12 @@ mkTyVar flavour name = TyVar flavour name (head name) CNone
 
 pTRecord = mkFromRowType TRecordF
        <$> getPosition
-       <*> (braces $ optionMaybe (try pTVar <|> pTRowBody pTRecordEntry))
+       <*> (try (Just <$> braces pTVar) <|> (braces $ optionMaybe (pTRowBody pTRecordEntry)))
        <?> "record type annotation"
 
 pTVariant = mkFromRowType TVariantF
        <$> getPosition
-       <*> (angles $ optionMaybe (try pTVar <|> pTRowBody pTVariantEntry))
+       <*> (try (Just <$> angles pTVar) <|> (angles $ optionMaybe (pTRowBody pTVariantEntry)))
        <?> "variant type annotation"
 
 pTRowBody pEntry = mkTRowExtend
