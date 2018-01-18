@@ -19,6 +19,7 @@ unitTests = testGroup
   , relationalTests
   , constraintTests
   , rankNTests
+  , lazyTests
   ]
 
 letTests = testGroup
@@ -127,6 +128,13 @@ rankNTests = testGroup
   "Rank-N polymorphism"
   [ hasValue "let f = (g : forall a. a -> a) -> {l = g True, r = g 1} in f (x -> x) == {l = True, r = 1}" True
   , hasValue "let f = g -> {l = g True, r = g 1} : (forall a. a -> a) -> {l : Bool, r : Int } in f (x -> x) == {l = True, r = 1}" True , hasValue "let f = (m : forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = m.reverse \"abc\" } in f (import \"Prelude.x\") == {l = [False, True], r = \"cba\"}" True
+  ]
+
+lazyTests = testGroup
+  "Lazy evaluation tests using error primitive"
+  [ hasValue "maybe (error \"bang!\") (x -> x == 42) (Just 42)" True
+  , hasValue "{ x = error \"boom!\", y = 42 }.y" (42::Integer)
+  , hasValue "case Bar (error \"fizzle!\") of { Foo{} -> 0 | otherwise -> 42 }" (42::Integer)
   ]
 
 hasValue :: (Eq a, Show a, HasValue a) => String -> a -> TestTree
