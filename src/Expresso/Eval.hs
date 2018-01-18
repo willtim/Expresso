@@ -499,41 +499,30 @@ data Options = Options
 defaultOptions :: Options
 defaultOptions = Options
 
-typeOf :: HasType a => Proxy a -> Type
-typeOf = snd . typeOfWith defaultOptions NoCtx
 
 -- | Haskell types with a corresponding Expresso type.
 -- TODO generalize proxy?
 class HasType a where
-
-    typeOfWith :: Options -> Ctx -> Proxy a -> (Maybe String, Type)
-    default typeOfWith :: (G.Generic a, GHasType (G.Rep a)) => Options -> Ctx -> Proxy a -> (Maybe String, Type)
-    typeOfWith opts ct = gtypeOf opts ct . fmap G.from
-class GHasType f where
-    -- Give the Expresso type for a generic representation
-    --
-    -- Ctx is used to signify Record vs Variant context
-    --
-    -- The (Maybe String) contains constructor/selector names that we want to propagate to
-    -- the outer level, so we can translate e.g. (Maybe a) as <Nothing, Just: a>
-    gtypeOf :: Options -> Ctx -> Proxy (f x) -> (Maybe String, Type)
-
-toValue :: ToValue a => a -> Value
-toValue = toValueWith defaultOptions NoCtx
+    typeOf :: HasType a => Proxy a -> Type
+    default typeOf :: (G.Generic a, GHasType (G.Rep a)) => Proxy a -> Type
+    typeOf = gtypeOf defaultOptions . fmap G.from
 
 -- | Haskell types whose values can be converted to Expresso values.
 class HasType a => ToValue a where
-    toValueWith :: Options -> Ctx -> a -> Value
-    default toValueWith :: (G.Generic a, GToValue (G.Rep a)) => Options -> Ctx -> a -> Value
-    toValueWith opts ct = gtoValue opts ct . G.from
-class GHasType f => GToValue f where
-    gtoValue :: Options -> Ctx -> f x -> Value
+    toValue :: ToValue a => a -> Value
+    default toValue :: (G.Generic a, GToValue (G.Rep a)) => a -> Value
+    toValue = gtoValue defaultOptions . G.from
 
 -- | Haskell types whose values can be represented by Expresso values.
 class HasType a => FromValue a where
     fromValue :: MonadEval f => Value -> f a
     default fromValue :: (G.Generic a, GFromValue (G.Rep a), MonadEval f) => Value -> f a
     fromValue x = G.to <$> gfromValue defaultOptions x
+
+class GHasType f where
+    gtypeOf :: Options -> Proxy (f x) -> Type
+class GHasType f => GToValue f where
+    gtoValue :: Options -> f x -> Value
 class GFromValue g where
     gfromValue :: MonadEval f => Options -> Value -> f (g x)
 
@@ -541,75 +530,85 @@ class GFromValue g where
 -- of the surrounding context. We need this to properly decompose Haskell ADTs with >2 constructors into
 -- proper (right-associative) rows. For records we also keep track of the number of elements, so we
 -- can generate default selector functions _1, _2, _3 etc.
-data Ctx = NoCtx | Var | Rec Int
-  deriving (Show)
+{- data Ctx = NoCtx | Var | Rec Int -}
+  {- deriving (Show) -}
 
-setTag :: b -> (Maybe b, a) -> (Maybe b, a)
-setTag b (_, a) = (Just b, a)
-
+{- setTag :: b -> (Maybe b, a) -> (Maybe b, a) -}
+{- setTag b (_, a) = (Just b, a) -}
 
 instance (GHasType f, G.Constructor c) => GHasType (G.M1 G.C c f) where
-    gtypeOf opts ct = setTag (G.conName m) . gtypeOf opts ct . fmap G.unM1
-      where m = (undefined :: t c f a)
 instance (GHasType f, G.Selector c) => GHasType (G.S1 c f) where
-    gtypeOf opts ct = setTag (G.selName m) . gtypeOf opts ct . fmap G.unM1
-      where m = (undefined :: t c f a)
 instance GHasType f => GHasType (G.D1 c f) where
-    gtypeOf opts ct = gtypeOf opts ct . fmap G.unM1
 
 instance GHasType (G.U1) where
-    gtypeOf opts Rec{} _  = pure $ _TRowEmpty
-    gtypeOf opts _ _    = pure $ _TRecord $ _TRowEmpty
 instance GHasType (G.V1) where
-    gtypeOf opts Var _ = pure $ _TRowEmpty
-    gtypeOf opts _ _   = pure $ _TVariant $ _TRowEmpty
-
--- FIXME this allows infinite types to be generated, but is also necessary for valid cases
--- Can we forbid recursive Haskell types altogether?
 instance HasType c => GHasType (G.K1 t c) where
-    gtypeOf opts ct proxy = typeOfWith opts NoCtx (G.unK1 <$> proxy)
-
 instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where
-  gtypeOf opts ct proxy =
-    case gtypeOf opts NoCtx (leftP proxy) of
-      -- Nothing is impossible, as we know the left branch will be a constructor (so the C1 instance is used)
-      (Nothing, lType) ->
-        error "FIXME can happen: tree is balanced"
-      (Just lLabel, lType) ->
-        case gtypeOf opts Var (rightP proxy) of
-          (Just rLabel, rType) -> pure $ tag ct (_TRowExtend lLabel lType (_TRowExtend rLabel rType _TRowEmpty))
-          (Nothing, rType) ->     pure $ tag ct (_TRowExtend lLabel lType rType)
-    where
-      -- Emit variant tag whenever we're entering a variant context
-      -- If we're already inside a variant, just emit the row type component
-      tag Var = id
-      tag ct  = _TVariant
-
 instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
-  gtypeOf opts ct proxy =
-    case gtypeOf opts NoCtx (leftP proxy) of
-      -- Nothing is impossible, as we know the left branch will be a selector (so the S1 instance is used)
-      (Nothing, lType) ->
-        error "FIXME can happen: tree is balanced"
-      (Just lLabel, lType) ->
-        case gtypeOf opts (Rec $ succ $ used) (rightP proxy) of
-          (Just rLabel, rType) -> pure $ tag ct (_TRowExtend (fl lLabel) lType (_TRowExtend (fr rLabel) rType _TRowEmpty))
-          (Nothing, rType) ->     pure $ tag ct (_TRowExtend (fl lLabel) lType rType)
-    where
-      -- Replace empty field names with dummy names, so e.g. (4,5) becomes {_1:4,_2:5}
-      fl "" = "_" ++ show (used + 1)
-      fl x  = x
-      fr "" = "_" ++ show (used + 2)
-      fr x  = x
 
-      used = case ct of
-        (Rec n) -> n
-        _ -> 0
 
-      -- Emit record tag whenever we're entering a record context
-      -- If we're already inside a record, just emit the row type component
-      tag Rec{} = id
-      tag ct    = _TRecord
+{- instance (GHasType f, G.Constructor c) => GHasType (G.M1 G.C c f) where -}
+    {- gtypeOf opts ct = setTag (G.conName m) . gtypeOf opts ct . fmap G.unM1 -}
+      {- where m = (undefined :: t c f a) -}
+{- instance (GHasType f, G.Selector c) => GHasType (G.S1 c f) where -}
+    {- gtypeOf opts ct = setTag (G.selName m) . gtypeOf opts ct . fmap G.unM1 -}
+      {- where m = (undefined :: t c f a) -}
+{- instance GHasType f => GHasType (G.D1 c f) where -}
+    {- gtypeOf opts ct = gtypeOf opts ct . fmap G.unM1 -}
+
+{- instance GHasType (G.U1) where -}
+    {- gtypeOf opts Rec{} _  = pure $ _TRowEmpty -}
+    {- gtypeOf opts _ _    = pure $ _TRecord $ _TRowEmpty -}
+{- instance GHasType (G.V1) where -}
+    {- gtypeOf opts Var _ = pure $ _TRowEmpty -}
+    {- gtypeOf opts _ _   = pure $ _TVariant $ _TRowEmpty -}
+
+{- -- FIXME this allows infinite types to be generated, but is also necessary for valid cases -}
+{- -- Can we forbid recursive Haskell types altogether? -}
+{- instance HasType c => GHasType (G.K1 t c) where -}
+    {- gtypeOf opts ct proxy = typeOfWith opts NoCtx (G.unK1 <$> proxy) -}
+
+{- instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where -}
+  {- gtypeOf opts ct proxy = -}
+    {- case gtypeOf opts NoCtx (leftP proxy) of -}
+      {- -- Nothing is impossible, as we know the left branch will be a constructor (so the C1 instance is used) -}
+      {- (Nothing, lType) -> -}
+        {- error "FIXME can happen: tree is balanced" -}
+      {- (Just lLabel, lType) -> -}
+        {- case gtypeOf opts Var (rightP proxy) of -}
+          {- (Just rLabel, rType) -> pure $ tag ct (_TRowExtend lLabel lType (_TRowExtend rLabel rType _TRowEmpty)) -}
+          {- (Nothing, rType) ->     pure $ tag ct (_TRowExtend lLabel lType rType) -}
+    {- where -}
+      {- -- Emit variant tag whenever we're entering a variant context -}
+      {- -- If we're already inside a variant, just emit the row type component -}
+      {- tag Var = id -}
+      {- tag ct  = _TVariant -}
+
+{- instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where -}
+  {- gtypeOf opts ct proxy = -}
+    {- case gtypeOf opts NoCtx (leftP proxy) of -}
+      {- -- Nothing is impossible, as we know the left branch will be a selector (so the S1 instance is used) -}
+      {- (Nothing, lType) -> -}
+        {- error "FIXME can happen: tree is balanced" -}
+      {- (Just lLabel, lType) -> -}
+        {- case gtypeOf opts (Rec $ succ $ used) (rightP proxy) of -}
+          {- (Just rLabel, rType) -> pure $ tag ct (_TRowExtend (fl lLabel) lType (_TRowExtend (fr rLabel) rType _TRowEmpty)) -}
+          {- (Nothing, rType) ->     pure $ tag ct (_TRowExtend (fl lLabel) lType rType) -}
+    {- where -}
+      {- -- Replace empty field names with dummy names, so e.g. (4,5) becomes {_1:4,_2:5} -}
+      {- fl "" = "_" ++ show (used + 1) -}
+      {- fl x  = x -}
+      {- fr "" = "_" ++ show (used + 2) -}
+      {- fr x  = x -}
+
+      {- used = case ct of -}
+        {- (Rec n) -> n -}
+        {- _ -> 0 -}
+
+      {- -- Emit record tag whenever we're entering a record context -}
+      {- -- If we're already inside a record, just emit the row type component -}
+      {- tag Rec{} = id -}
+      {- tag ct    = _TRecord -}
 
 leftP :: forall (q :: (k -> k) -> (k -> k) -> k -> k) f g a . Proxy ((f `q` g) a) -> Proxy (f a)
 leftP _ = Proxy
@@ -620,19 +619,19 @@ rightP _ = Proxy
 
 
 instance GToValue f => GToValue (G.D1 c f) where
-  gtoValue opts ct (G.M1 x) = gtoValue opts ct x
+  gtoValue = error "TODO"
 
 instance (GToValue f, G.Constructor c) => GToValue (G.C1 c f) where
-  gtoValue opts ct (G.M1 x) = gtoValue opts ct x
+  gtoValue = error "TODO"
 
 instance (GToValue f, G.Selector c) => GToValue (G.S1 c f) where
-  gtoValue opts ct (G.M1 x) = gtoValue opts ct x
+  gtoValue = error "TODO"
 
 instance ToValue c => GToValue (G.K1 t c) where
-  gtoValue opts ct v = toValueWith opts NoCtx (G.unK1 v)
+  gtoValue = error "TODO"
 
 instance GToValue G.U1 where
-  gtoValue opts ct _ = VRecord mempty
+  gtoValue = error "TODO"
 
 instance GToValue G.V1 where
   gtoValue = error "absurd"
@@ -642,21 +641,6 @@ instance (GToValue f, GToValue g) => GToValue (f G.:+: g) where
 
 -- TODO get tag from underlying value...
 instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
-  gtoValue opts ct lr@(l G.:*: r) =
-    case (gtypeOf opts NoCtx (pure l), gtoValue opts NoCtx l) of
-      (lt, lv) -> case (gtypeOf opts incCtx (pure r), gtoValue opts incCtx r) of
-        -- TODO get labels..
-        -- FIXME this record case depends on context...
-        (rt, rv) -> trace (show (ct, fmap ppType $ gtypeOf opts NoCtx (pure lr), fmap ppType lt, ppValue lv, fmap ppType rt, ppValue rv)) (VInt 0)
-        {- (VRecord rv -> VRecord (HashMap.singleton "fox" lv <> rv) -}
-        {- v          -> VRecord (HashMap.fromList [("foo", lv), ("bar", valueToThunk v)]) -}
-        {- v -> error $ "Expected VRecord, got " ++ show (ppValue v) -}
-    where
-      incCtx =(Rec $ succ $ used)
-      used = case ct of
-        (Rec n) -> n
-        _ -> 0
-
 
 -- TODO for testing...
 data V1 a = S { s :: a } deriving (G.Generic)
@@ -693,17 +677,17 @@ instance (GFromValue f, GFromValue g) => GFromValue (f G.:*: g) where
 
 
 instance HasType Integer where
-    typeOfWith _ _ _ = pure $ _TInt
+    typeOf _ = _TInt
 instance HasType Int where
-    typeOfWith _ _ _ = pure $ _TInt
+    typeOf _ = _TInt
 instance HasType Double where
-    typeOfWith _ _ _ = pure $ _TDbl
+    typeOf _ = _TDbl
 instance HasType Char where
-    typeOfWith _ _ _ = pure $ _TChar
+    typeOf _ = _TChar
 instance HasType a => HasType [a] where
-    typeOfWith opts ct p = _TList <$> typeOfWith opts ct (inside p)
+    typeOf p = _TList $ typeOf (inside p)
 instance (HasType a, HasType b) => HasType (a -> b) where
-    typeOfWith opts ct p = _TFun <$> (typeOfWith opts ct $ dom p) <*> (typeOfWith opts ct $ inside p)
+    typeOf p = _TFun (typeOf $ dom p) (typeOf $ inside p)
 
 instance HasType Void
 instance HasType ()
@@ -744,15 +728,15 @@ codom = inside
 instance ToValue ()
 instance ToValue Void
 instance ToValue Integer where
-    toValueWith _ _ = VInt
+    toValue = VInt
 instance ToValue Int where
-    toValueWith _ _ = VInt . fromIntegral
-instance ToValue Double where
-    toValueWith _ _ = VDbl
-instance ToValue Char where
-    toValueWith _ _ = VChar
-instance ToValue a => ToValue [a] where
-    toValueWith _ _ = VList . fmap toValue
+    toValue = VInt . fromIntegral
+{- instance ToValue Double where -}
+    {- toValueWith _ _ = VDbl -}
+{- instance ToValue Char where -}
+    {- toValueWith _ _ = VChar -}
+{- instance ToValue a => ToValue [a] where -}
+    {- toValueWith _ _ = VList . fmap toValue -}
 
 instance FromValue Integer where
     fromValue (VInt i) = return i
@@ -810,7 +794,7 @@ instance (ToValue a, FromValue b) => FromValue (a -> b) where
 -- FIXME remove
 -- | A record where all fields have the same type.
 instance HasType a => HasType (HashMap Name a) where
-    typeOfWith = error "Impossible: FIXME rewrite tests to use real HS records instead of faking it"
+    typeOf = error "Impossible: FIXME rewrite tests to use real HS records instead of faking it"
 instance FromValue a => FromValue (HashMap Name a) where
     fromValue (VRecord m) = mapM fromValue' m
     fromValue v           = failfromValue "VRecord" v
