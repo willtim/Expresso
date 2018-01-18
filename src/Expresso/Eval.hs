@@ -4,6 +4,7 @@
 
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
 {-# LANGUAGE DataKinds #-}
@@ -54,14 +55,18 @@ module Expresso.Eval(
 )
 where
 
+import Data.Hashable
 import Control.Monad.Except hiding (mapM)
 import Control.Applicative
+import Data.Bifunctor (first)
 import Data.Foldable (foldrM)
+import Data.Map (Map)
 import Data.HashMap.Strict (HashMap)
 import Data.Coerce
 import Data.Maybe
 import Data.Monoid
 import Data.Ord
+import qualified Data.Map as Map
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.List as List
 import Control.Monad.ST
@@ -505,7 +510,7 @@ defaultOptions = Options
 class HasType a where
     typeOf :: HasType a => Proxy a -> Type
     default typeOf :: (G.Generic a, GHasType (G.Rep a)) => Proxy a -> Type
-    typeOf = gtypeOf defaultOptions . fmap G.from
+    typeOf = either id renderADT . gtypeOf defaultOptions . fmap G.from
 
 -- | Haskell types whose values can be converted to Expresso values.
 class HasType a => ToValue a where
@@ -520,7 +525,7 @@ class HasType a => FromValue a where
     fromValue x = G.to <$> gfromValue defaultOptions x
 
 class GHasType f where
-    gtypeOf :: Options -> Proxy (f x) -> Type
+    gtypeOf :: Options -> Proxy (f x) -> Either Type (ADT Type)
 class GHasType f => GToValue f where
     gtoValue :: Options -> f x -> Value
 class GFromValue g where
@@ -536,9 +541,80 @@ class GFromValue g where
 {- setTag :: b -> (Maybe b, a) -> (Maybe b, a) -}
 {- setTag b (_, a) = (Just b, a) -}
 
-instance (GHasType f, G.Constructor c) => GHasType (G.M1 G.C c f) where
+-- TODO this is not super-typed...
+
+type ConstructorName = Name
+type SelectorName = Name
+-- | An algebraic data type.
+data ADT a = ADT { getADT :: Map ConstructorName (Map SelectorName a) }
+  deriving (Eq, Show)
+
+fixConsNames :: ADT a -> ADT a
+fixConsNames (ADT outer) = ADT (g <$> outer)
+  where
+    g inner
+      | hasAutoKeys inner = replaceKeys (fmap (("_" <>) . show) [1..]) inner
+      | otherwise = inner
+
+
+    replaceKeys :: (Ord k, Hashable k) => [k] -> Map k a -> Map k a
+    replaceKeys ks m = Map.fromList $ zip ks $ fmap snd $ Map.toList m
+
+    -- TODO ugly hack, see below
+    hasAutoKeys x = case List.find ("___" `List.isInfixOf`) $ Map.keys x of
+      Nothing -> False
+      _ -> True
+
+renderADT :: ADT Type -> Type
+renderADT (ADT outer)
+  = _TVariant $ Map.foldrWithKey (\k v -> _TRowExtend k (g v)) _TRowEmpty outer
+  where
+    g inner
+      = _TRecord $ Map.foldrWithKey (\k v -> _TRowExtend k v) _TRowEmpty inner
+
+singleton :: a -> ADT a
+singleton v = ADT $ Map.singleton "" $ Map.singleton "" v
+
+selector :: SelectorName -> ADT a -> ADT a
+selector k (ADT outer) = ADT (g <$> outer)
+  where
+    g inner
+      | Map.size inner == 1 = Map.singleton k (head $ toList inner)
+      | otherwise = error "ADT: Unexpected"
+constructor :: SelectorName -> ADT a -> ADT a
+constructor k (ADT outer) = ADT $ g outer
+  where
+    g x
+      | Map.size x == 1 = Map.singleton k (head $ toList x)
+      | otherwise = error "ADT: Unexpected"
+
+prod :: ADT a -> ADT a -> ADT a
+prod (ADT l) (ADT r) = ADT (Map.unionWith unionDisamb l r)
+  where
+    -- So we don't loose data on empty constructor names
+    --
+    -- We'll overwrite these at the top-level, now we just need
+    -- to preserve lexiographic order
+    unionDisamb :: Map Name a -> Map Name a -> Map Name a
+    unionDisamb a b = mapKeys ("___a"<>) a `Map.union` mapKeys ("___b"<>) b
+
+    mapKeys f = Map.fromList . fmap (first f) . Map.toList
+
+coprod :: ADT a -> ADT a -> ADT a
+coprod (ADT l) (ADT r) = ADT (l `Map.union` r)
+
+
+
+{- pattern SimpleType a = Left a -}
+{- pattern AlgType a    = Right a -}
+
+pattern Id a = G.M1 a
+runId = G.unM1
+
+instance (GHasType f, G.Constructor c) => GHasType (G.C1 c f) where
 instance (GHasType f, G.Selector c) => GHasType (G.S1 c f) where
 instance GHasType f => GHasType (G.D1 c f) where
+  gtypeOf opts x = gtypeOf opts (runId <$> x)
 
 instance GHasType (G.U1) where
 instance GHasType (G.V1) where
