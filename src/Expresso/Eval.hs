@@ -4,6 +4,7 @@
 
 {-# LANGUAGE CPP #-}
 {-# LANGUAGE ConstraintKinds #-}
+{-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
@@ -85,7 +86,7 @@ import Expresso.Utils (cata, (:*:)(..), K(..))
 import qualified Expresso.Parser as Parser
 
 #if __GLASGOW_HASKELL__ <= 708
-import Prelude hiding (mapM, concat, elem, and)
+import Prelude hiding (mapM, concat, elem, and, any)
 import Data.Foldable
 import Data.Traversable
 #endif
@@ -547,7 +548,7 @@ type ConstructorName = Name
 type SelectorName = Name
 -- | An algebraic data type.
 data ADT a = ADT { getADT :: Map ConstructorName (Map SelectorName a) }
-  deriving (Eq, Show)
+  deriving (Eq, Show, Functor)
 
 fixConsNames :: ADT a -> ADT a
 fixConsNames (ADT outer) = ADT (g <$> outer)
@@ -589,8 +590,14 @@ constructor k (ADT outer) = ADT $ g outer
       | otherwise = error "ADT: Unexpected"
 
 prod :: ADT a -> ADT a -> ADT a
-prod (ADT l) (ADT r) = ADT (Map.unionWith unionDisamb l r)
+prod (ADT l) (ADT r)
+  | hasAmbNamesF l || hasAmbNamesF r = ADT $ Map.unionWith unionDisamb l r
+  | otherwise                        = ADT $ Map.unionWith Map.union l r
   where
+    hasAmbNamesF = any hasAmbNames
+    hasAmbNames :: Map Name a -> Bool
+    hasAmbNames = not . null . filter (== "") . Map.keys
+
     -- So we don't loose data on empty constructor names
     --
     -- We'll overwrite these at the top-level, now we just need
