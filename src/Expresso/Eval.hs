@@ -511,7 +511,7 @@ defaultOptions = Options
 class HasType a where
     typeOf :: HasType a => Proxy a -> Type
     default typeOf :: (G.Generic a, GHasType (G.Rep a)) => Proxy a -> Type
-    typeOf = either id renderADT . gtypeOf defaultOptions . fmap G.from
+    typeOf = either id (renderADT . improveADT) . gtypeOf defaultOptions . fmap G.from
 
 -- | Haskell types whose values can be converted to Expresso values.
 class HasType a => ToValue a where
@@ -567,12 +567,19 @@ fixConsNames (ADT outer) = ADT (g <$> outer)
       Nothing -> False
       _ -> True
 
+improveADT = fixConsNames
+
 renderADT :: ADT Type -> Type
 renderADT (ADT outer)
-  = _TVariant $ Map.foldrWithKey (\k v -> _TRowExtend k (g v)) _TRowEmpty outer
+  = foldOrSingle _TVariant (\k v -> _TRowExtend k (g v)) _TRowEmpty (\_ m -> g m) outer
   where
     g inner
-      = _TRecord $ Map.foldrWithKey (\k v -> _TRowExtend k v) _TRowEmpty inner
+      = foldOrSingle _TRecord (\k v -> _TRowExtend k v) _TRowEmpty (flip const) inner
+
+    foldOrSingle :: (b -> c) -> (k -> a -> b -> b) -> b -> (k -> a -> c) -> Map k a -> c
+    foldOrSingle post f z o x = case Map.toList x of
+      [(k, v)] -> o k v
+      _ -> post $ Map.foldrWithKey f z x
 
 singleton :: a -> ADT a
 singleton v = ADT $ Map.singleton "" $ Map.singleton "" v
@@ -621,7 +628,7 @@ terminal :: ADT a
 terminal = ADT (Map.singleton "()" $ mempty)
 
 -- FIXME test
-at1 =  ppType $ renderADT $
+at1 =  ppType $ renderADT $ fixConsNames $
   (constructor "Foo"
     (selector "a" (singleton _TInt) `prod` selector "b" (singleton (_TList _TInt))))
   `coprod`
@@ -808,7 +815,8 @@ instance HasType a => HasType [a] where
 instance (HasType a, HasType b) => HasType (a -> b) where
     typeOf p = _TFun (typeOf $ dom p) (typeOf $ inside p)
 
-instance HasType Void
+instance HasType Void where
+  typeOf _ = _TVariant _TRowEmpty
 instance HasType ()
 instance HasType Bool
 instance HasType Ordering
