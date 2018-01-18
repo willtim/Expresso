@@ -60,7 +60,7 @@ import Data.Hashable
 import Control.Monad.Except hiding (mapM)
 import Control.Applicative
 import Data.Bifunctor (first)
-import Data.Foldable (foldrM)
+import Data.Foldable (foldrM, toList)
 import Data.Map (Map)
 import Data.HashMap.Strict (HashMap)
 import Data.Coerce
@@ -858,12 +858,12 @@ instance ToValue Integer where
     toValue = VInt
 instance ToValue Int where
     toValue = VInt . fromIntegral
-{- instance ToValue Double where -}
-    {- toValueWith _ _ = VDbl -}
-{- instance ToValue Char where -}
-    {- toValueWith _ _ = VChar -}
-{- instance ToValue a => ToValue [a] where -}
-    {- toValueWith _ _ = VList . fmap toValue -}
+instance ToValue Double where
+    toValue = VDbl
+instance ToValue Char where
+    toValue = VChar
+instance ToValue a => ToValue [a] where
+    toValue = VList . fmap toValue
 
 instance FromValue Integer where
     fromValue (VInt i) = return i
@@ -909,7 +909,7 @@ instance FromValue a => FromValue [a] where
 fromValueL fromValue (VList xs) = mapM fromValue xs
 fromValueL _         v          = failfromValue "VList" v
 
--- FIXME carry type in class to make this safe
+-- FIXME carry EvalM type in class to make this safe
 instance (ToValue a, FromValue b) => FromValue (a -> b) where
     fromValue (VLam f) = fmap (fmap $ either (error "unexpected") id) $ pure $ \x -> runEvalM' $ do
       x <- (mkThunk $ pure $ toValue x)
