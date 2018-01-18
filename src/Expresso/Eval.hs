@@ -614,6 +614,11 @@ prod (ADT l) (ADT r)
 coprod :: ADT a -> ADT a -> ADT a
 coprod (ADT l) (ADT r) = ADT (l `Map.union` r)
 
+initial :: ADT a
+initial = ADT mempty
+
+terminal :: ADT a
+terminal = ADT (Map.singleton "()" $ mempty)
 
 -- FIXME test
 at1 =  ppType $ renderADT $
@@ -628,17 +633,37 @@ at1 =  ppType $ renderADT $
 
 pattern Id a = G.M1 a
 runId = G.unM1
+runConst = G.unK1
 
+-- TODO remove Either in return type of gtypeOf if Left is not used...
+-- TODO move
 instance (GHasType f, G.Constructor c) => GHasType (G.C1 c f) where
+  gtypeOf opts x = fmap (constructor $ G.conName m) $ gtypeOf opts (runId <$> x)
+    where m = (undefined :: t c f a)
 instance (GHasType f, G.Selector c) => GHasType (G.S1 c f) where
+  gtypeOf opts x = fmap (selector $ G.selName m) $ gtypeOf opts (runId <$> x)
+    where m = (undefined :: t c f a)
 instance GHasType f => GHasType (G.D1 c f) where
   gtypeOf opts x = gtypeOf opts (runId <$> x)
 
 instance GHasType (G.U1) where
+  gtypeOf _ _ = pure $ terminal
 instance GHasType (G.V1) where
+  gtypeOf _ _ = pure $ initial
 instance HasType c => GHasType (G.K1 t c) where
+  -- FIXME recurse with opts
+  -- hows does aeson achieve it (without polluting the top-level class?)
+  gtypeOf opts p = pure $ singleton $ typeOf (runConst <$> p)
 instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where
+  gtypeOf opts p = coprod <$> (gtypeOf opts lp) <*> (gtypeOf opts rp)
+    where
+      lp = leftP p
+      rp = rightP p
 instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
+  gtypeOf opts p = prod <$> (gtypeOf opts lp) <*> (gtypeOf opts rp)
+    where
+      lp = leftP p
+      rp = rightP p
 
 
 {- instance (GHasType f, G.Constructor c) => GHasType (G.M1 G.C c f) where -}
