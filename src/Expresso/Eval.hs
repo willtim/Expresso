@@ -546,6 +546,7 @@ class GFromValue g where
 
 type ConstructorName = Name
 type SelectorName = Name
+
 -- | An algebraic data type.
 data ADT a = ADT { getADT :: Map ConstructorName (Map SelectorName a) }
   deriving (Eq, Show, Functor)
@@ -582,6 +583,7 @@ selector k (ADT outer) = ADT (g <$> outer)
     g inner
       | Map.size inner == 1 = Map.singleton k (head $ toList inner)
       | otherwise = error "ADT: Unexpected"
+
 constructor :: SelectorName -> ADT a -> ADT a
 constructor k (ADT outer) = ADT $ g outer
   where
@@ -598,10 +600,12 @@ prod (ADT l) (ADT r)
     hasAmbNames :: Map Name a -> Bool
     hasAmbNames = not . null . filter (== "") . Map.keys
 
-    -- So we don't loose data on empty constructor names
+    -- Haskell allows positional products (aka "tuples"), so we need to
+    -- make up names to avoid ambiguity.
     --
-    -- We'll overwrite these at the top-level, now we just need
-    -- to preserve lexiographic order
+    -- As we don't know how products will be nested, we just make up something
+    -- preserving order. At the top level we will overwrite this with: _1, _2,
+    -- etc.
     unionDisamb :: Map Name a -> Map Name a -> Map Name a
     unionDisamb a b = mapKeys ("___a"<>) a `Map.union` mapKeys ("___b"<>) b
 
@@ -610,6 +614,13 @@ prod (ADT l) (ADT r)
 coprod :: ADT a -> ADT a -> ADT a
 coprod (ADT l) (ADT r) = ADT (l `Map.union` r)
 
+
+-- FIXME test
+at1 =  ppType $ renderADT $
+  (constructor "Foo"
+    (selector "a" (singleton _TInt) `prod` selector "b" (singleton (_TList _TInt))))
+  `coprod`
+  (constructor "B" $ singleton _TInt)
 
 
 {- pattern SimpleType a = Left a -}
