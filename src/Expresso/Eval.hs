@@ -818,7 +818,8 @@ instance (HasType a, HasType b) => HasType (a -> b) where
 instance HasType Void where
   typeOf _ = _TVariant _TRowEmpty
 instance HasType ()
-instance HasType Bool
+instance HasType Bool where
+  typeOf _ = _TBool
 instance HasType Ordering
 -- FIXME remove Maybe/Char from lang, add Text
 instance (HasType a) => HasType (Maybe a)
@@ -852,8 +853,17 @@ codom :: proxy (a -> b) -> Proxy b
 codom = inside
 
 
-instance ToValue ()
+-- FIXME: internally remove special types for Bool/Maybe, then derive these instances (use variants)
+
+
+-- TODO derive
+instance ToValue () where
+    toValue _ = VRecord mempty
 instance ToValue Void
+
+-- TODO derive
+instance ToValue Bool where
+    toValue = VBool
 instance ToValue Integer where
     toValue = VInt
 instance ToValue Int where
@@ -862,6 +872,10 @@ instance ToValue Double where
     toValue = VDbl
 instance ToValue Char where
     toValue = VChar
+
+-- TODO derive
+instance ToValue a => ToValue (Maybe a) where
+    toValue = VMaybe . fmap toValue
 instance ToValue a => ToValue [a] where
     toValue = VList . fmap toValue
 
@@ -877,19 +891,20 @@ instance FromValue Double where
     fromValue v        = failfromValue "VDbl" v
 
 -- TODO derive
-instance FromValue Bool
-{- instance FromValue Bool where -}
-    {- fromValue (VBool b) = return b -}
-    {- fromValue v         = failfromValue "VBool" v -}
+{- instance FromValue Bool -}
+instance FromValue Bool where
+    fromValue (VBool b) = return b
+    fromValue v         = failfromValue "VBool" v
 
 instance FromValue Char where
     fromValue (VChar c) = return c
     fromValue v         = failfromValue "VChar" v
 
-instance FromValue a => FromValue (Maybe a)
-{- instance FromValue a => FromValue (Maybe a) where -}
-    {- fromValue (VMaybe m) = mapM fromValue m -}
-    {- fromValue v          = failfromValue "VMaybe" v -}
+-- TODO derive
+{- instance FromValue a => FromValue (Maybe a) -}
+instance FromValue a => FromValue (Maybe a) where
+    fromValue (VMaybe m) = mapM fromValue m
+    fromValue v          = failfromValue "VMaybe" v
 
 instance
 --  {-# OVERLAPS #-}

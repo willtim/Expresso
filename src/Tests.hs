@@ -178,10 +178,10 @@ foreignTypeTests = testGroup
   , hasType (xx :: Proxy ()) "{}"
   , hasType (xx :: Proxy Void) "<>"
   , hasType (xx :: Proxy (Either () ())) "<Left : {}, Right : {}>"
-  , hasType (xx :: Proxy (Maybe Int)) "<Nothing : {}, Just : Int>"
+  , hasType (xx :: Proxy (Maybe Int)) "<Just : Int, Nothing : {}>"
   {- , hasType (xx :: Proxy (Map String Bool)) "" -} -- TODO add maps as [{key:k,value:v)]
-  , hasType (xx :: Proxy (Ordering)) "<LT : {}, EQ : {}, GT : {}>"
-  , hasType (xx :: Proxy (Rat)) "<Rat : {nom : Int, denom : Int}, Simple : Int>"
+  , hasType (xx :: Proxy (Ordering)) "<EQ : {}, GT : {}, LT : {}>"
+  , hasType (xx :: Proxy (Rat)) "<Rat : {denom : Int, nom : Int}, Simple : Int>"
 
   , hasType (xx :: Proxy ((Int -> Void) -> Double)) "(Int -> <>) -> Double"
   ]
@@ -189,11 +189,11 @@ foreignImportTests = testGroup
   "Foreign import"
   [ isValue (1 :: Int) "1"
   , isValue (1 :: Integer) "1"
-  {- , isValue True "True" -}
+  , isValue True "True"
   , isValue (2.5 :: Double) "2.5"
   , isValue "hello" "\"hello\""
-  {- , isValue () "{}" -}
-  {- , isValue (Just 2) "Just 2" -}
+  , isValue () "{}"
+  , isValue (Just (2 :: Int)) "Just 2"
   ]
 foreignExportTests = testGroup
   "Foreign export"
