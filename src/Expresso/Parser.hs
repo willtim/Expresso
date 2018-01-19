@@ -444,7 +444,7 @@ mkTForAll pos tvs (M.fromListWith unionConstraints -> m) t
            | tv <- tvs
            ]
     setConstraint tv c = tv { tyvarConstraint = c }
-    bndrs     = S.map tyvarName $ tyVarBndrs t'
+    bndrs     = S.fromList $ map tyvarName tvs
     badNames  = S.toList $ M.keysSet m  S.\\ bndrs
 
 pTVar = (\pos -> withAnn pos . TVarF)
