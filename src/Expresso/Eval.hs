@@ -3,6 +3,7 @@
 {-# OPTIONS_GHC -fno-warn-unused-binds #-}
 
 {-# LANGUAGE CPP #-}
+{-# LANGUAGE GADTs #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE PatternSynonyms #-}
@@ -525,14 +526,16 @@ class HasType a => ToValue a where
 class HasType a => FromValue a where
     fromValue :: MonadEval f => Value -> f a
     default fromValue :: (G.Generic a, GFromValue (G.Rep a), MonadEval f) => Value -> f a
-    fromValue = runParser . fmap G.to . renderADTParser . improveADT $ gfromValue defaultOptions Proxy
+    {- fromValue = runParser . fmap G.to . renderADTParser . improveADT $ gfromValue defaultOptions Proxy -}
+    fromValue = error "fromValue"
 
 class GHasType f where
     gtypeOf :: Options -> Proxy (f x) -> Either Type (ADT Type)
 class GHasType f => GToValue f where
     gtoValue :: Options -> f x -> ADT Value
 class GHasType f => GFromValue f where
-    gfromValue :: MonadEval g => Options -> Proxy (f x) -> ADT (Parser g (f x))
+    type ADFor f :: C
+    gfromValue :: MonadEval g => Options -> Proxy (f x) -> AD (ADFor f) (Parser g (f x))
 
 -- | This thing is passed around when traversing generic representations of Haskell types to keep track
 -- of the surrounding context. We need this to properly decompose Haskell ADTs with >2 constructors into
@@ -553,6 +556,10 @@ type SelectorName = Name
 data ADT a = ADT { getADT :: Map ConstructorName (Map SelectorName a) }
   deriving (Eq, Show, Functor)
 
+-- | Replace all auto-generated names in products.
+-- E.g. rewrites
+--
+--  {___a:A, ___b:B} -> {_1:A, _2:B}
 fixConsNames :: ADT a -> ADT a
 fixConsNames (ADT outer) = ADT (g <$> outer)
   where
@@ -596,6 +603,49 @@ improveADT = fixConsNames
     Disallowing singleton products is probably uncontroversial.
  -}
 
+
+data C = Var | Rec | None
+class NotVar c
+instance NotVar None
+instance NotVar Rec
+
+--
+-- NOTE this is just a free alternative with two extra values, e.g.
+--   import Control.Alternative.Free.Final(Alt)
+--
+-- data AddInitTerm a = Init | Term | Neither a
+-- data AddField r = AddCons String r | AddSel String r | AddNone r
+-- type AD = AD . AddInitTerm
+data AD :: C -> * -> * where
+  Singleton :: a -> AD None a
+  -- Constructor/Selector 'resets' the prod/coprod context
+  -- FIXME require None or Var
+  Constructor :: NotVar x => String -> AD x a -> AD Var a
+  Selector :: String -> AD None a -> AD Rec a -- A Prod can only contain other Prods, Selector, or Terminal
+  -- This implies every field has to be named
+  Prod :: (a -> b -> c) -> AD Rec a -> AD Rec b -> AD Rec c
+  Terminal :: AD Rec a
+
+  -- A coprod can only contain other Coprods, Constructor, or Initial
+  -- This implies every alternative has to be named
+  Coprod :: (a -> c) -> (b -> c) -> AD Var a -> AD Var b -> AD Var c
+  Initial :: AD Var a
+
+  -- TODO can probably be restricted to (AD Var)
+  Map :: (a -> b) -> AD x a -> AD x b
+instance Functor (AD x) where
+  fmap = Map
+
+{- ad1 = Coprod id id -}
+  {- (Constructor "A" $ Singleton "Int") -}
+  {- (Constructor "B" -}
+    {- (Prod const -}
+      {- (Selector "Bool" $ Singleton "Int") -}
+      {- (Prod const -}
+        {- Terminal -}
+        {- (Selector "Bool" $ Singleton "Bool")))) -}
+{- ad2 = Prod const (Selector "A" ad1) (Selector "B" ad1) -}
+
 renderADT :: ADT Type -> Type
 renderADT (ADT outer)
   = foldOrSingle
@@ -614,6 +664,7 @@ renderADT (ADT outer)
         -- Remove singleton products
         {- (\k v -> _TRecord $ _TRowExtend k v _TRowEmpty) -}
         inner
+
 
 renderADTValue :: ADT Value -> Value
 renderADTValue (ADT outer)
@@ -642,6 +693,8 @@ instance Alternative f => Alternative (Parser f)
 variantParser :: Name -> Parser f a -> Parser f a
 variantParser = error "variantParser"
 
+
+-- | A parser that looks for a subfield.
 fieldParser :: Name -> Parser f a -> Parser f a
 fieldParser = error "fieldParser"
 
@@ -827,37 +880,71 @@ instance (HasType a, HasType b, HasType c, HasType d) => HasType (V4 a b c d)
 instance (ToValue a, ToValue b, ToValue c, ToValue d) => ToValue (V4 a b c d)
 
 
-_Id :: f x -> G.C1 c f x
+_Id :: f x -> G.M1 t c f x
 _Id = G.M1
 
 _Const :: c -> G.K1 i c x
 _Const = G.K1
 
-instance (GFromValue f, G.Constructor c) => GFromValue (G.C1 c f) where
-  gfromValue opts x = (constructor $ G.conName m) $ fmap (fmap _Id) $ gfromValue opts (runId <$> x)
+instance (GFromValue f, NotVar (ADFor f), G.Constructor c) => GFromValue (G.C1 c f) where
+  type ADFor (G.C1 c f) = Var
+  gfromValue opts p = fmap (fmap _Id) $ Constructor (G.conName m) $ gfromValue opts (runId <$> p)
     where m = (undefined :: t c f a)
-instance (GFromValue f, G.Selector c) => GFromValue (G.S1 c f) where
-  gfromValue = error "TODO"
+instance (GFromValue f, ADFor f ~ None, G.Selector c) => GFromValue (G.S1 c f) where
+  type ADFor (G.S1 c f) = Rec
+  gfromValue opts p = fmap (fmap _Id) $ Selector (G.selName m) $ gfromValue opts (runId <$> p)
+    where m = (undefined :: t c f a)
 instance GFromValue f => GFromValue (G.D1 c f) where
-  gfromValue = error "TODO"
+  type ADFor (G.D1 c f) = ADFor f
+  gfromValue opts p = fmap (fmap _Id) $ gfromValue opts (runId <$> p)
 instance FromValue c => GFromValue (G.K1 t c) where
-  gfromValue opts _ = singleton $ fmap _Const $ Parser $ fromValue
+  type ADFor (G.K1 t c) = None
+  gfromValue opts p = Singleton $ fmap _Const $ Parser fromValue
 instance GFromValue G.U1 where
-  gfromValue opts _ = terminal
+  type ADFor G.U1 = Rec
+  gfromValue opts p = Terminal
 instance GFromValue G.V1 where
-  gfromValue opts _ = initial
-instance (GFromValue f, GFromValue g) => GFromValue (f G.:+: g) where
-  {- gfromValue opts (G.L1 x) = inL (gfromValue opts x) -}
-  {- gfromValue opts (G.R1 x) = inR (gtoValue opts x) -}
-  gfromValue opts p = coprod (fmap (fmap G.L1) $ gfromValue opts lp) (fmap (fmap G.R1) $ gfromValue opts rp)
+  type ADFor G.V1 = Rec
+  gfromValue opts p = Terminal
+instance (GFromValue f, GFromValue g, ADFor f ~ Var, ADFor g ~ Var) => GFromValue (f G.:+: g) where
+  type ADFor (f G.:+: g) = Var
+  gfromValue opts p = Coprod (fmap G.L1) (fmap G.R1) (gfromValue opts lp) (gfromValue opts rp)
     where
       lp = leftP p
       rp = rightP p
-instance (GFromValue f, GFromValue g) => GFromValue (f G.:*: g) where
-  gfromValue opts p = prodWith (liftA2 (G.:*:)) (gfromValue opts lp) (gfromValue opts rp)
+instance (GFromValue f, GFromValue g, ADFor f ~ Rec, ADFor g ~ Rec) => GFromValue (f G.:*: g) where
+  type ADFor (f G.:*: g) = Rec
+  gfromValue opts p = Prod (liftA2 (G.:*:)) (gfromValue opts lp) (gfromValue opts rp)
     where
       lp = leftP p
       rp = rightP p
+
+
+{- instance (GFromValue f, G.Constructor c) => GFromValue (G.C1 c f) where -}
+  {- gfromValue opts x = (constructor $ G.conName m) $ fmap (fmap _Id) $ gfromValue opts (runId <$> x) -}
+    {- where m = (undefined :: t c f a) -}
+{- instance (GFromValue f, G.Selector c) => GFromValue (G.S1 c f) where -}
+  {- gfromValue = error "TODO" -}
+{- instance GFromValue f => GFromValue (G.D1 c f) where -}
+  {- gfromValue = error "TODO" -}
+{- instance FromValue c => GFromValue (G.K1 t c) where -}
+  {- gfromValue opts _ = singleton $ fmap _Const $ Parser $ fromValue -}
+{- instance GFromValue G.U1 where -}
+  {- gfromValue opts _ = terminal -}
+{- instance GFromValue G.V1 where -}
+  {- gfromValue opts _ = initial -}
+{- instance (GFromValue f, GFromValue g) => GFromValue (f G.:+: g) where -}
+  {- {- gfromValue opts (G.L1 x) = inL (gfromValue opts x) -} -}
+  {- {- gfromValue opts (G.R1 x) = inR (gtoValue opts x) -} -}
+  {- gfromValue opts p = coprod (fmap (fmap G.L1) $ gfromValue opts lp) (fmap (fmap G.R1) $ gfromValue opts rp) -}
+    {- where -}
+      {- lp = leftP p -}
+      {- rp = rightP p -}
+{- instance (GFromValue f, GFromValue g) => GFromValue (f G.:*: g) where -}
+  {- gfromValue opts p = prodWith (liftA2 (G.:*:)) (gfromValue opts lp) (gfromValue opts rp) -}
+    {- where -}
+      {- lp = leftP p -}
+      {- rp = rightP p -}
 
 
 
