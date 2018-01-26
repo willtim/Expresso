@@ -777,16 +777,16 @@ instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
   gtoValue opts (lp G.:*: rp) = prod (gtoValue opts lp) (gtoValue opts rp)
 
 -- TODO for testing...
-data V1 a = S { s :: a } deriving (G.Generic)
+data V1 a = V1 { s :: a } deriving (G.Generic)
 instance (HasType a) => HasType (V1 a)
 instance (ToValue a) => ToValue (V1 a)
-data V2 a b = P { a :: a, b :: b } deriving (G.Generic)
+data V2 a b = V2 { a :: a, b :: b } deriving (G.Generic)
 instance (HasType a, HasType b) => HasType (V2 a b)
 instance (ToValue a, ToValue b) => ToValue (V2 a b)
-data V3 a b c = T { x :: a, y :: b, z :: c } deriving (G.Generic)
+data V3 a b c = V3 { x :: a, y :: b, z :: c } deriving (G.Generic)
 instance (HasType a, HasType b, HasType c) => HasType (V3 a b c)
 instance (ToValue a, ToValue b, ToValue c) => ToValue (V3 a b c)
-data V4 a b c d = Q { m :: a, n :: b, o :: c, p :: d } deriving (G.Generic)
+data V4 a b c d = V4 { m :: a, n :: b, o :: c, p :: d } deriving (G.Generic)
 instance (HasType a, HasType b, HasType c, HasType d) => HasType (V4 a b c d)
 instance (ToValue a, ToValue b, ToValue c, ToValue d) => ToValue (V4 a b c d)
 
