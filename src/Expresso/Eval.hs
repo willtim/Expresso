@@ -106,10 +106,12 @@ deriving instance MonadError String EvalM
 
 newtype Thunk = Thunk { force_ :: EvalM Value }
 
-type ApplicativeMonadError e f = (Applicative f, MonadError e f)
+type ApplicativeMonadError e f = (Applicative f, Alternative f, MonadError e f)
 
 class ApplicativeMonadError String f => MonadEval f where
   force :: Thunk -> f Value
+instance Alternative EvalM where
+  EvalM a <|> EvalM b = EvalM (a <|> b)
 instance MonadEval EvalM where
   force = force_
 
@@ -523,14 +525,14 @@ class HasType a => ToValue a where
 class HasType a => FromValue a where
     fromValue :: MonadEval f => Value -> f a
     default fromValue :: (G.Generic a, GFromValue (G.Rep a), MonadEval f) => Value -> f a
-    fromValue x = G.to <$> gfromValue defaultOptions x
+    fromValue = runParser . fmap G.to . renderADTParser . improveADT $ gfromValue defaultOptions Proxy
 
 class GHasType f where
     gtypeOf :: Options -> Proxy (f x) -> Either Type (ADT Type)
 class GHasType f => GToValue f where
     gtoValue :: Options -> f x -> ADT Value
-class GHasType g => GFromValue g where
-    gfromValue :: MonadEval f => Options -> Value -> f (g x)
+class GHasType f => GFromValue f where
+    gfromValue :: MonadEval g => Options -> Proxy (f x) -> ADT (Parser g (f x))
 
 -- | This thing is passed around when traversing generic representations of Haskell types to keep track
 -- of the surrounding context. We need this to properly decompose Haskell ADTs with >2 constructors into
@@ -616,6 +618,7 @@ renderADT (ADT outer)
 renderADTValue :: ADT Value -> Value
 renderADTValue (ADT outer)
   = foldOrSingle
+    -- TODO clean up this error printing...
     id (\k v r -> error $ "unexpected variant with >1 element" <> show (k,runEvalM'.ppValue' $ g v,runEvalM'.ppValue' $ r)) (error "absurd!")
     (\k v -> VVariant k $ valueToThunk $ g v)
     outer
@@ -625,6 +628,39 @@ renderADTValue (ADT outer)
         VRecord (\k v -> HashMap.insert k (valueToThunk v)) mempty
         (\_ v -> v)
         inner
+
+newtype Parser (f :: * -> *) a = Parser { runParser :: Value -> f a }
+  {- deriving (Functor, Applicative, Monad, MonadError, ApplicativeMonadError, Alternative) -}
+
+deriving instance Functor f => Functor (Parser f)
+instance Applicative f => Applicative (Parser f)
+instance Alternative f => Alternative (Parser f)
+
+-- NOTE applicative etc
+
+
+variantParser :: Name -> Parser f a -> Parser f a
+variantParser = error "variantParser"
+
+fieldParser :: Name -> Parser f a -> Parser f a
+fieldParser = error "fieldParser"
+
+prodWith :: (a -> b -> c) -> ADT a -> ADT b -> ADT c
+prodWith = error "prodWith"
+
+renderADTParser :: (MonadEval f) => ADT (Parser f a) -> Parser f a
+renderADTParser (ADT outer)
+  = foldOrSingle
+    id (\k v r -> error $ "unexpected variant with >1 element") (error "absurd!")
+    (\k v -> variantParser k $ g v)
+    outer
+  where
+    g inner
+      = foldOrSingle
+        id (\k v r -> fieldParser k v <|> r) empty
+        (\_ v -> v)
+        inner
+
 
 -- TODO move
 foldOrSingle :: (b -> c) -> (k -> a -> b -> b) -> b -> (k -> a -> c) -> Map k a -> c
@@ -648,6 +684,7 @@ constructor k (ADT outer) = ADT $ g outer
     g x
       | Map.size x == 1 = Map.singleton k (head $ toList x)
       | otherwise = error "ADT: Unexpected"
+
 
 prod :: ADT a -> ADT a -> ADT a
 prod (ADT l) (ADT r)
@@ -757,7 +794,6 @@ instance (GToValue f, G.Selector c) => GToValue (G.S1 c f) where
 
 instance GToValue f => GToValue (G.D1 c f) where
   gtoValue opts x = gtoValue opts (runId x)
-    where m = (undefined :: t c f a)
 
 instance ToValue c => GToValue (G.K1 t c) where
   gtoValue opts p = singleton $ toValue (runConst $ p)
@@ -791,22 +827,37 @@ instance (HasType a, HasType b, HasType c, HasType d) => HasType (V4 a b c d)
 instance (ToValue a, ToValue b, ToValue c, ToValue d) => ToValue (V4 a b c d)
 
 
-instance GFromValue f => GFromValue (G.D1 c f) where
-  gfromValue = error "TODO"
+_Id :: f x -> G.C1 c f x
+_Id = G.M1
+
+_Const :: c -> G.K1 i c x
+_Const = G.K1
+
 instance (GFromValue f, G.Constructor c) => GFromValue (G.C1 c f) where
-  gfromValue = error "TODO"
+  gfromValue opts x = (constructor $ G.conName m) $ fmap (fmap _Id) $ gfromValue opts (runId <$> x)
+    where m = (undefined :: t c f a)
 instance (GFromValue f, G.Selector c) => GFromValue (G.S1 c f) where
   gfromValue = error "TODO"
+instance GFromValue f => GFromValue (G.D1 c f) where
+  gfromValue = error "TODO"
 instance FromValue c => GFromValue (G.K1 t c) where
-  gfromValue opts = error "absurd"
+  gfromValue opts _ = singleton $ fmap _Const $ Parser $ fromValue
 instance GFromValue G.U1 where
-  gfromValue opts _ = pure G.U1
+  gfromValue opts _ = terminal
 instance GFromValue G.V1 where
-  gfromValue = error "TODO"
+  gfromValue opts _ = initial
 instance (GFromValue f, GFromValue g) => GFromValue (f G.:+: g) where
-  gfromValue = error "TODO"
+  {- gfromValue opts (G.L1 x) = inL (gfromValue opts x) -}
+  {- gfromValue opts (G.R1 x) = inR (gtoValue opts x) -}
+  gfromValue opts p = coprod (fmap (fmap G.L1) $ gfromValue opts lp) (fmap (fmap G.R1) $ gfromValue opts rp)
+    where
+      lp = leftP p
+      rp = rightP p
 instance (GFromValue f, GFromValue g) => GFromValue (f G.:*: g) where
-  gfromValue = error "TODO"
+  gfromValue opts p = prodWith (liftA2 (G.:*:)) (gfromValue opts lp) (gfromValue opts rp)
+    where
+      lp = leftP p
+      rp = rightP p
 
 
 
