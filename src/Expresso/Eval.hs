@@ -517,7 +517,7 @@ class HasType a where
 class HasType a => ToValue a where
     toValue :: ToValue a => a -> Value
     default toValue :: (G.Generic a, GToValue (G.Rep a)) => a -> Value
-    toValue = gtoValue defaultOptions . G.from
+    toValue = renderADTValue . improveADT . gtoValue defaultOptions . G.from
 
 -- | Haskell types whose values can be represented by Expresso values.
 class HasType a => FromValue a where
@@ -528,8 +528,8 @@ class HasType a => FromValue a where
 class GHasType f where
     gtypeOf :: Options -> Proxy (f x) -> Either Type (ADT Type)
 class GHasType f => GToValue f where
-    gtoValue :: Options -> f x -> Value
-class GFromValue g where
+    gtoValue :: Options -> f x -> ADT Value
+class GHasType g => GFromValue g where
     gfromValue :: MonadEval f => Options -> Value -> f (g x)
 
 -- | This thing is passed around when traversing generic representations of Haskell types to keep track
@@ -567,19 +567,70 @@ fixConsNames (ADT outer) = ADT (g <$> outer)
       Nothing -> False
       _ -> True
 
+improveADT :: ADT a -> ADT a
 improveADT = fixConsNames
+
+{-
+
+  NOTE encoding variations:
+    Note that the following types are isomorphic, but have different types and representations
+    in Expresso:
+      A
+      {foo:A}
+      <Foo:A>
+    More notably, these unify:
+      {bar:A,...} ~ {bar:A}
+    while these do not:
+      {bar:A,...} ~ A
+
+    This gives us some ambiguity when encoding HS types.
+
+    Removing singleton variants gives more natural encoding for normal tuples
+      () ~ {}                 instead of  <() : {}>
+      (a,b) ~ {_1:a, _2:b}    instead of  <(,) : {_1:a, _2:b}>
+    but has the drawback of 'collapsing' newtypes:
+      Sum Int ~ Int           insted of <Sum : Int>
+
+    Disallowing singleton products is probably uncontroversial.
+ -}
 
 renderADT :: ADT Type -> Type
 renderADT (ADT outer)
-  = foldOrSingle _TVariant (\k v -> _TRowExtend k (g v)) _TRowEmpty (\_ m -> g m) outer
+  = foldOrSingle
+    _TVariant (\k v -> _TRowExtend k (g v)) _TRowEmpty
+    -- Remove singleton variants
+    (\k m -> g m)
+    -- Allowing them would look like this (e.g. a normal foldrWithKey)
+    {- (\k v -> _TVariant $ _TRowExtend k (g v) _TRowEmpty) -}
+    outer
   where
     g inner
-      = foldOrSingle _TRecord (\k v -> _TRowExtend k v) _TRowEmpty (flip const) inner
+      = foldOrSingle
+        _TRecord (\k v -> _TRowExtend k v) _TRowEmpty
+          -- A fold for general products/records
+        (flip const)
+        -- Remove singleton products
+        {- (\k v -> _TRecord $ _TRowExtend k v _TRowEmpty) -}
+        inner
 
-    foldOrSingle :: (b -> c) -> (k -> a -> b -> b) -> b -> (k -> a -> c) -> Map k a -> c
-    foldOrSingle post f z o x = case Map.toList x of
-      [(k, v)] -> o k v
-      _ -> post $ Map.foldrWithKey f z x
+renderADTValue :: ADT Value -> Value
+renderADTValue (ADT outer)
+  = foldOrSingle
+    id (\k v r -> error $ "unexpected variant with >1 element" <> show (k,runEvalM'.ppValue' $ g v,runEvalM'.ppValue' $ r)) (error "absurd!")
+    (\k v -> VVariant k $ valueToThunk $ g v)
+    outer
+  where
+    g inner
+      = foldOrSingle
+        VRecord (\k v -> HashMap.insert k (valueToThunk v)) mempty
+        (\_ v -> v)
+        inner
+
+-- TODO move
+foldOrSingle :: (b -> c) -> (k -> a -> b -> b) -> b -> (k -> a -> c) -> Map k a -> c
+foldOrSingle post f z o x = case Map.toList x of
+  [(k, v)] -> o k v
+  _ -> post $ Map.foldrWithKey f z x
 
 singleton :: a -> ADT a
 singleton v = ADT $ Map.singleton "" $ Map.singleton "" v
@@ -613,6 +664,9 @@ prod (ADT l) (ADT r)
     -- As we don't know how products will be nested, we just make up something
     -- preserving order. At the top level we will overwrite this with: _1, _2,
     -- etc.
+    --
+    -- TODO this is a hack, replace the special strings with (Either [Int] String)
+    -- or something.
     unionDisamb :: Map Name a -> Map Name a -> Map Name a
     unionDisamb a b = mapKeys ("___a"<>) a `Map.union` mapKeys ("___b"<>) b
 
@@ -621,6 +675,12 @@ prod (ADT l) (ADT r)
 coprod :: ADT a -> ADT a -> ADT a
 coprod (ADT l) (ADT r) = ADT (l `Map.union` r)
 
+inL :: ADT a -> ADT a
+inR :: ADT a -> ADT a
+inL = id
+inR = id
+
+
 initial :: ADT a
 initial = ADT mempty
 
@@ -628,11 +688,16 @@ terminal :: ADT a
 terminal = ADT (Map.singleton "()" $ mempty)
 
 -- FIXME test
-at1 =  ppType $ renderADT $ fixConsNames $
+at1 =  ppType $ renderADT $ improveADT $
   (constructor "Foo"
     (selector "a" (singleton _TInt) `prod` selector "b" (singleton (_TList _TInt))))
   `coprod`
   (constructor "B" $ singleton _TInt)
+-- FIXME test
+at2 = runEvalM' $ ppValue' $ renderADTValue $ improveADT $
+  (constructor "Foo"
+    (selector "a" (singleton $ VInt 2) `prod` selector "b" (singleton (VList [VInt 33]))))
+  {- (constructor "B" $ singleton $ VRecord mempty) -}
 
 
 {- pattern SimpleType a = Left a -}
@@ -673,68 +738,6 @@ instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where
       rp = rightP p
 
 
-{- instance (GHasType f, G.Constructor c) => GHasType (G.M1 G.C c f) where -}
-    {- gtypeOf opts ct = setTag (G.conName m) . gtypeOf opts ct . fmap G.unM1 -}
-      {- where m = (undefined :: t c f a) -}
-{- instance (GHasType f, G.Selector c) => GHasType (G.S1 c f) where -}
-    {- gtypeOf opts ct = setTag (G.selName m) . gtypeOf opts ct . fmap G.unM1 -}
-      {- where m = (undefined :: t c f a) -}
-{- instance GHasType f => GHasType (G.D1 c f) where -}
-    {- gtypeOf opts ct = gtypeOf opts ct . fmap G.unM1 -}
-
-{- instance GHasType (G.U1) where -}
-    {- gtypeOf opts Rec{} _  = pure $ _TRowEmpty -}
-    {- gtypeOf opts _ _    = pure $ _TRecord $ _TRowEmpty -}
-{- instance GHasType (G.V1) where -}
-    {- gtypeOf opts Var _ = pure $ _TRowEmpty -}
-    {- gtypeOf opts _ _   = pure $ _TVariant $ _TRowEmpty -}
-
-{- -- FIXME this allows infinite types to be generated, but is also necessary for valid cases -}
-{- -- Can we forbid recursive Haskell types altogether? -}
-{- instance HasType c => GHasType (G.K1 t c) where -}
-    {- gtypeOf opts ct proxy = typeOfWith opts NoCtx (G.unK1 <$> proxy) -}
-
-{- instance (GHasType f, GHasType g) => GHasType (f G.:+: g) where -}
-  {- gtypeOf opts ct proxy = -}
-    {- case gtypeOf opts NoCtx (leftP proxy) of -}
-      {- -- Nothing is impossible, as we know the left branch will be a constructor (so the C1 instance is used) -}
-      {- (Nothing, lType) -> -}
-        {- error "FIXME can happen: tree is balanced" -}
-      {- (Just lLabel, lType) -> -}
-        {- case gtypeOf opts Var (rightP proxy) of -}
-          {- (Just rLabel, rType) -> pure $ tag ct (_TRowExtend lLabel lType (_TRowExtend rLabel rType _TRowEmpty)) -}
-          {- (Nothing, rType) ->     pure $ tag ct (_TRowExtend lLabel lType rType) -}
-    {- where -}
-      {- -- Emit variant tag whenever we're entering a variant context -}
-      {- -- If we're already inside a variant, just emit the row type component -}
-      {- tag Var = id -}
-      {- tag ct  = _TVariant -}
-
-{- instance (GHasType f, GHasType g) => GHasType (f G.:*: g) where -}
-  {- gtypeOf opts ct proxy = -}
-    {- case gtypeOf opts NoCtx (leftP proxy) of -}
-      {- -- Nothing is impossible, as we know the left branch will be a selector (so the S1 instance is used) -}
-      {- (Nothing, lType) -> -}
-        {- error "FIXME can happen: tree is balanced" -}
-      {- (Just lLabel, lType) -> -}
-        {- case gtypeOf opts (Rec $ succ $ used) (rightP proxy) of -}
-          {- (Just rLabel, rType) -> pure $ tag ct (_TRowExtend (fl lLabel) lType (_TRowExtend (fr rLabel) rType _TRowEmpty)) -}
-          {- (Nothing, rType) ->     pure $ tag ct (_TRowExtend (fl lLabel) lType rType) -}
-    {- where -}
-      {- -- Replace empty field names with dummy names, so e.g. (4,5) becomes {_1:4,_2:5} -}
-      {- fl "" = "_" ++ show (used + 1) -}
-      {- fl x  = x -}
-      {- fr "" = "_" ++ show (used + 2) -}
-      {- fr x  = x -}
-
-      {- used = case ct of -}
-        {- (Rec n) -> n -}
-        {- _ -> 0 -}
-
-      {- -- Emit record tag whenever we're entering a record context -}
-      {- -- If we're already inside a record, just emit the row type component -}
-      {- tag Rec{} = id -}
-      {- tag ct    = _TRecord -}
 
 leftP :: forall (q :: (k -> k) -> (k -> k) -> k -> k) f g a . Proxy ((f `q` g) a) -> Proxy (f a)
 leftP _ = Proxy
@@ -744,29 +747,34 @@ rightP _ = Proxy
 
 
 
-instance GToValue f => GToValue (G.D1 c f) where
-  gtoValue = error "TODO"
-
 instance (GToValue f, G.Constructor c) => GToValue (G.C1 c f) where
-  gtoValue = error "TODO"
+  gtoValue opts x = (constructor $ G.conName m) $ gtoValue opts (runId x)
+    where m = (undefined :: t c f a)
 
 instance (GToValue f, G.Selector c) => GToValue (G.S1 c f) where
-  gtoValue = error "TODO"
+  gtoValue opts x = (selector $ G.selName m) $ gtoValue opts (runId x)
+    where m = (undefined :: t c f a)
+
+instance GToValue f => GToValue (G.D1 c f) where
+  gtoValue opts x = gtoValue opts (runId x)
+    where m = (undefined :: t c f a)
 
 instance ToValue c => GToValue (G.K1 t c) where
-  gtoValue = error "TODO"
+  gtoValue opts p = singleton $ toValue (runConst $ p)
 
 instance GToValue G.U1 where
-  gtoValue = error "TODO"
+  gtoValue _ _ = terminal
 
 instance GToValue G.V1 where
-  gtoValue = error "absurd"
+  gtoValue _ _ = initial
 
 instance (GToValue f, GToValue g) => GToValue (f G.:+: g) where
-  gtoValue = error "TODO"
+  gtoValue opts (G.L1 x) = inL (gtoValue opts x)
+  gtoValue opts (G.R1 x) = inR (gtoValue opts x)
 
 -- TODO get tag from underlying value...
 instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
+  gtoValue opts (lp G.:*: rp) = prod (gtoValue opts lp) (gtoValue opts rp)
 
 -- TODO for testing...
 data V1 a = S { s :: a } deriving (G.Generic)
@@ -785,11 +793,11 @@ instance (ToValue a, ToValue b, ToValue c, ToValue d) => ToValue (V4 a b c d)
 
 instance GFromValue f => GFromValue (G.D1 c f) where
   gfromValue = error "TODO"
-instance GFromValue f => GFromValue (G.C1 c f) where
+instance (GFromValue f, G.Constructor c) => GFromValue (G.C1 c f) where
   gfromValue = error "TODO"
-instance GFromValue f => GFromValue (G.S1 c f) where
+instance (GFromValue f, G.Selector c) => GFromValue (G.S1 c f) where
   gfromValue = error "TODO"
-instance GFromValue (G.K1 t c) where
+instance FromValue c => GFromValue (G.K1 t c) where
   gfromValue opts = error "absurd"
 instance GFromValue G.U1 where
   gfromValue opts _ = pure G.U1

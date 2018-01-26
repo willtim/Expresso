@@ -162,6 +162,12 @@ instance HasType Rat
 instance FromValue Rat
 instance ToValue Rat
 
+newtype ANewType = ANewType { runANewType :: Int } deriving Generic
+
+instance HasType ANewType
+instance FromValue ANewType
+instance ToValue ANewType
+
 foreignTypeTests = testGroup
   "Foreign types"
   [ hasType (xx :: Proxy Int) "Int"
@@ -182,6 +188,12 @@ foreignTypeTests = testGroup
   {- , hasType (xx :: Proxy (Map String Bool)) "" -} -- TODO add maps as [{key:k,value:v)]
   , hasType (xx :: Proxy (Ordering)) "<EQ : {}, GT : {}, LT : {}>"
   , hasType (xx :: Proxy (Rat)) "<Rat : {denom : Int, nom : Int}, Simple : Int>"
+
+  -- TODO treat ANewType as <ANewType : Int> instead?
+  --
+  -- No: This complicates the representation of things isomorphic to (), (a,b) etc
+  -- Tagging can easily be provided by overriding HasType anyway
+  , hasType (xx :: Proxy (ANewType)) "Int"
 
   , hasType (xx :: Proxy ((Int -> Void) -> Double)) "(Int -> <>) -> Double"
   ]
