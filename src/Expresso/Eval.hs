@@ -546,7 +546,7 @@ class GHasType f => GToValue f where
     gtoValue :: Options -> f x -> ADT Value
 class GHasType f => GFromValue f where
     type ADFor f :: C
-    gfromValue :: MonadEval g => Options -> Proxy (f x) -> AD (ADFor f) (Parser g (f x))
+    gfromValue :: MonadEval g => Options -> Proxy (f x) -> AD (ADFor f) (Parser g) (f x)
 
 -- | This thing is passed around when traversing generic representations of Haskell types to keep track
 -- of the surrounding context. We need this to properly decompose Haskell ADTs with >2 constructors into
@@ -624,26 +624,35 @@ instance NotVar Rec
 -- Haskell style ADT
 --
 -- This could be relaxed to normal row-polymorphism by relaxing the constraint on selectors
-data AD :: C -> * -> * where
-  Singleton :: a -> AD None a
+data AD :: C -> (* -> *) -> * -> * where
+  Singleton :: f a -> AD None f a
   -- Constructor/Selector 'resets' the prod/coprod context
   -- FIXME require None or Var
-  Constructor :: NotVar x   => String -> AD x a -> AD Var a
-  Selector    :: (x ~ None) => String -> AD x a -> AD Rec a -- A Prod can only contain other Prods, Selector, or Terminal
+  Constructor :: NotVar x   => String -> AD x f a -> AD Var f a
+  Selector    :: (x ~ None) => String -> AD x f a -> AD Rec f a -- A Prod can only contain other Prods, Selector, or Terminal
   -- This implies every field has to be named
-  Prod :: forall a b c f . (a -> b -> c) -> AD Rec a -> AD Rec b -> AD Rec c
-  Terminal :: a -> AD Rec a
+  Prod :: (a -> b -> c) -> AD Rec f a -> AD Rec f b -> AD Rec f c
+  Terminal :: f a -> AD Rec f a
 
   -- A coprod can only contain other Coprods, Constructor, or Initial
   -- This implies every alternative has to be named
-  Coprod :: (a -> c) -> (b -> c) -> AD Var a -> AD Var b -> AD Var c
-  Initial :: AD Var a
+  Coprod :: (a -> c) -> (b -> c) -> AD Var f a -> AD Var f b -> AD Var f c
+  Initial :: AD Var f a
+
+instance Functor f => Functor (AD x f) where
+  fmap f (Singleton fa) = Singleton $ fmap f fa
+  fmap f (Constructor n x) = Constructor n (fmap f x)
+  fmap f (Selector n x) = Selector n (fmap f x)
+  fmap f (Terminal fa) = Terminal $ fmap f fa
+  fmap f Initial = Initial
+  fmap f (Prod g a b) = Prod (\a b -> f $ g a b) a b
+  fmap f (Coprod g h a b) = Coprod (f . g) (f . h) a b
 
   -- TODO can probably be restricted to (AD Var)
-  Map :: (a -> b) -> AD x a -> AD x b
+  {- Map :: (a -> b) -> AD x a -> AD x b -}
   {- LiftA2 :: (a -> b -> c) -> AD x a -> AD x b -> AD x c -}
-instance Functor (AD x) where
-  fmap = Map
+{- instance Functor (AD x) where -}
+  {- fmap = Map -}
 
 {- ad1 = Coprod id id -}
   {- (Constructor "A" $ Singleton "Int") -}
@@ -718,10 +727,10 @@ nextName = do
   put $ st + 1
   pure $ "_" <> show st
 
-renderADParser :: MonadEval f => AD Var (Parser f a) -> Parser f a
+renderADParser :: MonadEval f => AD Var (Parser f) a -> Parser f a
 renderADParser x = evalState (go x) 0
   where
-    go :: forall f a . MonadEval f => AD Var (Parser f a) -> State Int (Parser f a)
+    go :: forall f a . MonadEval f => AD Var (Parser f) a -> State Int (Parser f a)
     go Initial = pure empty
     go (Coprod f g x y) = liftA2 (<|>) (go $ f <$> x) (go $ g <$> y)
     go (Constructor k x) = do
@@ -729,17 +738,14 @@ renderADParser x = evalState (go x) 0
       pure $ _Parser $ \x -> case x of
         (VVariant n th) | n == k -> runParser p x
         _ -> throwError "Bad variant"
-    go (Map f x) = go $ fmap f x
 
-    go' :: forall f x a . MonadEval f => AD x (Parser f a) -> State Int (Parser f a)
+    go' :: forall f x a . MonadEval f => AD x (Parser f) a -> State Int (Parser f a)
     go' (Singleton p) = pure p
     go' (Terminal x) = pure x
-    {- go' (Prod f x y) = do -}
-      {- let _ = f :: Parser f a -> Parser f b -> Parser f c -}
-      {- a' <- go' x -}
-      {- b' <- go' y -}
-      {- pure $ liftP2 f a' b' -}
-      {- undefined -}
+    go' (Prod f x y) = do
+      a' <- go' x
+      b' <- go' y
+      pure $ liftA2 f a' b'
     go' (Selector k x) = do
       p <- go' x
       -- TODO work for sel names...
@@ -748,15 +754,14 @@ renderADParser x = evalState (go x) 0
           Just th -> do
             v <- force th
             runParser p v
-          _ -> fail
-        _ -> fail
+          _ -> fail k m
+        _ -> throwError "Not a record"
       where
-        fail = throwError "Bad record"
+        fail k m = throwError $ "Bad record, wanted " <> k <> ", got only " <> show (HashMap.keys m)
 
     go' x@Initial{} = go x
     go' x@Coprod{} = go x
     go' x@Constructor{} = go x
-    go' (Map f x) = go' $ fmap f x
 
 liftP2 :: (a -> b -> c) -> f a -> f b -> f c
 {- liftP2 = liftA2 -}
@@ -913,31 +918,37 @@ instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
   gtoValue opts (lp G.:*: rp) = prod (gtoValue opts lp) (gtoValue opts rp)
 
 -- TODO for testing...
-data V1 a = V1 { s :: a } deriving (G.Generic)
+data V1 a = V1 { s :: a } deriving (G.Generic, Show)
 instance (HasType a) => HasType (V1 a)
 instance (ToValue a) => ToValue (V1 a)
 instance (FromValue a) => FromValue (V1 a)
-data V2 a b = V2 { a :: a, b :: b } deriving (G.Generic)
+data V2 a b = V2 { a :: a, b :: b } deriving (G.Generic, Show)
 instance (HasType a, HasType b) => HasType (V2 a b)
 instance (ToValue a, ToValue b) => ToValue (V2 a b)
 instance (FromValue a, FromValue b) => FromValue (V2 a b)
-data V3 a b c = V3 { x :: a, y :: b, z :: c } deriving (G.Generic)
+data V3 a b c = V3 { x :: a, y :: b, z :: c } deriving (G.Generic, Show)
 instance (HasType a, HasType b, HasType c) => HasType (V3 a b c)
 instance (ToValue a, ToValue b, ToValue c) => ToValue (V3 a b c)
 instance (FromValue a, FromValue b, FromValue c) => FromValue (V3 a b c)
-data V4 a b c d = V4 { m :: a, n :: b, o :: c, p :: d } deriving (G.Generic)
+data V4 a b c d = V4 { m :: a, n :: b, o :: c, p :: d } deriving (G.Generic, Show)
 instance (HasType a, HasType b, HasType c, HasType d) => HasType (V4 a b c d)
 instance (ToValue a, ToValue b, ToValue c, ToValue d) => ToValue (V4 a b c d)
 instance (FromValue a, FromValue b, FromValue c, FromValue d) => FromValue (V4 a b c d)
+
+
 
 data Choice0 deriving (G.Generic)
 instance HasType Choice0
 instance ToValue Choice0
 instance FromValue Choice0
-data Choice3 a b c = Choice3_1 a | Choice3_2 b | Choice3_3 c deriving (G.Generic)
+data Choice3 a b c = Choice3_1 a | Choice3_2 b | Choice3_3 c deriving (G.Generic, Show)
 instance (HasType a, HasType b, HasType c) => HasType (Choice3 a b c)
 instance (ToValue a, ToValue b, ToValue c) => ToValue (Choice3 a b c)
 instance (FromValue a, FromValue b, FromValue c) => FromValue (Choice3 a b c)
+
+-- TODO test
+roundTrip :: (ToValue a, FromValue a) => a -> Either String a
+roundTrip = runEvalM' . fromValue . toValue
 
 
 _Id :: f x -> G.M1 t c f x
@@ -946,17 +957,20 @@ _Id = G.M1
 _Const :: c -> G.K1 i c x
 _Const = G.K1
 
+{- mapAD :: (forall a . f a -> g a) -> AD x f b -> AD x g b -}
+{- mapAD = undefined -}
+
 instance (GFromValue f, NotVar (ADFor f), G.Constructor c) => GFromValue (G.C1 c f) where
   type ADFor (G.C1 c f) = Var
-  gfromValue opts p = fmap (fmap _Id) $ Constructor (G.conName m) $ gfromValue opts (runId <$> p)
+  gfromValue opts p = fmap _Id $ Constructor (G.conName m) $ gfromValue opts (runId <$> p)
     where m = (undefined :: t c f a)
 instance (GFromValue f, ADFor f ~ None, G.Selector c) => GFromValue (G.S1 c f) where
   type ADFor (G.S1 c f) = Rec
-  gfromValue opts p = fmap (fmap _Id) $ Selector (G.selName m) $ gfromValue opts (runId <$> p)
+  gfromValue opts p = fmap _Id $ Selector (G.selName m) $ gfromValue opts (runId <$> p)
     where m = (undefined :: t c f a)
 instance GFromValue f => GFromValue (G.D1 c f) where
   type ADFor (G.D1 c f) = ADFor f
-  gfromValue opts p = fmap (fmap _Id) $ gfromValue opts (runId <$> p)
+  gfromValue opts p = fmap _Id $ gfromValue opts (runId <$> p)
 instance FromValue c => GFromValue (G.K1 t c) where
   type ADFor (G.K1 t c) = None
   gfromValue opts p = Singleton $ fmap _Const $ _Parser fromValue
@@ -968,13 +982,13 @@ instance GFromValue G.V1 where
   gfromValue opts p = Initial
 instance (GFromValue f, GFromValue g, ADFor f ~ Var, ADFor g ~ Var) => GFromValue (f G.:+: g) where
   type ADFor (f G.:+: g) = Var
-  gfromValue opts p = Coprod (fmap G.L1) (fmap G.R1) (gfromValue opts lp) (gfromValue opts rp)
+  gfromValue opts p = Coprod (G.L1) (G.R1) (gfromValue opts lp) (gfromValue opts rp)
     where
       lp = leftP p
       rp = rightP p
 instance (GFromValue f, GFromValue g, ADFor f ~ Rec, ADFor g ~ Rec) => GFromValue (f G.:*: g) where
   type ADFor (f G.:*: g) = Rec
-  gfromValue opts p = Prod (liftA2 (G.:*:)) (gfromValue opts lp) (gfromValue opts rp)
+  gfromValue opts p = Prod (G.:*:) (gfromValue opts lp) (gfromValue opts rp)
     where
       lp = leftP p
       rp = rightP p
@@ -1084,6 +1098,9 @@ instance ToValue a => ToValue (Maybe a) where
     toValue = VMaybe . fmap toValue
 instance ToValue a => ToValue [a] where
     toValue = VList . fmap toValue
+
+instance FromValue () where
+    fromValue _ = pure ()
 
 instance FromValue Integer where
     fromValue (VInt i) = return i
