@@ -631,8 +631,8 @@ data AD :: C -> * -> * where
   Constructor :: NotVar x   => String -> AD x a -> AD Var a
   Selector    :: (x ~ None) => String -> AD x a -> AD Rec a -- A Prod can only contain other Prods, Selector, or Terminal
   -- This implies every field has to be named
-  Prod :: (a -> b -> c) -> AD Rec a -> AD Rec b -> AD Rec c
-  Terminal :: AD Rec a
+  Prod :: forall a b c f . (a -> b -> c) -> AD Rec a -> AD Rec b -> AD Rec c
+  Terminal :: a -> AD Rec a
 
   -- A coprod can only contain other Coprods, Constructor, or Initial
   -- This implies every alternative has to be named
@@ -641,6 +641,7 @@ data AD :: C -> * -> * where
 
   -- TODO can probably be restricted to (AD Var)
   Map :: (a -> b) -> AD x a -> AD x b
+  {- LiftA2 :: (a -> b -> c) -> AD x a -> AD x b -> AD x c -}
 instance Functor (AD x) where
   fmap = Map
 
@@ -723,11 +724,43 @@ renderADParser x = evalState (go x) 0
     go :: forall f a . MonadEval f => AD Var (Parser f a) -> State Int (Parser f a)
     go Initial = pure empty
     go (Coprod f g x y) = liftA2 (<|>) (go $ f <$> x) (go $ g <$> y)
+    go (Constructor k x) = do
+      p <- go' x
+      pure $ _Parser $ \x -> case x of
+        (VVariant n th) | n == k -> runParser p x
+        _ -> throwError "Bad variant"
     go (Map f x) = go $ fmap f x
 
-    go x = do
-      pure undefined
+    go' :: forall f x a . MonadEval f => AD x (Parser f a) -> State Int (Parser f a)
+    go' (Singleton p) = pure p
+    go' (Terminal x) = pure x
+    {- go' (Prod f x y) = do -}
+      {- let _ = f :: Parser f a -> Parser f b -> Parser f c -}
+      {- a' <- go' x -}
+      {- b' <- go' y -}
+      {- pure $ liftP2 f a' b' -}
+      {- undefined -}
+    go' (Selector k x) = do
+      p <- go' x
+      -- TODO work for sel names...
+      pure $ _Parser $ \x -> case x of
+        (VRecord m) -> case HashMap.lookup k m of
+          Just th -> do
+            v <- force th
+            runParser p v
+          _ -> fail
+        _ -> fail
+      where
+        fail = throwError "Bad record"
 
+    go' x@Initial{} = go x
+    go' x@Coprod{} = go x
+    go' x@Constructor{} = go x
+    go' (Map f x) = go' $ fmap f x
+
+liftP2 :: (a -> b -> c) -> f a -> f b -> f c
+{- liftP2 = liftA2 -}
+liftP2 = undefined
 
 -- TODO move
 foldOrSingle :: (b -> c) -> (k -> a -> b -> b) -> b -> (k -> a -> c) -> Map k a -> c
@@ -929,7 +962,7 @@ instance FromValue c => GFromValue (G.K1 t c) where
   gfromValue opts p = Singleton $ fmap _Const $ _Parser fromValue
 instance GFromValue G.U1 where
   type ADFor G.U1 = Rec
-  gfromValue opts p = Terminal
+  gfromValue opts p = Terminal (pure $ G.U1)
 instance GFromValue G.V1 where
   type ADFor G.V1 = Var
   gfromValue opts p = Initial
