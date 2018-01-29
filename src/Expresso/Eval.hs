@@ -690,29 +690,9 @@ instance Alternative f => Alternative (Parser f)
 -- NOTE applicative etc
 
 
-variantParser :: Name -> Parser f a -> Parser f a
-variantParser = error "variantParser"
 
 
--- | A parser that looks for a subfield.
-fieldParser :: Name -> Parser f a -> Parser f a
-fieldParser = error "fieldParser"
-
-prodWith :: (a -> b -> c) -> ADT a -> ADT b -> ADT c
-prodWith = error "prodWith"
-
-renderADTParser :: (MonadEval f) => ADT (Parser f a) -> Parser f a
-renderADTParser (ADT outer)
-  = foldOrSingle
-    id (\k v r -> error $ "unexpected variant with >1 element") (error "absurd!")
-    (\k v -> variantParser k $ g v)
-    outer
-  where
-    g inner
-      = foldOrSingle
-        id (\k v r -> fieldParser k v <|> r) empty
-        (\_ v -> v)
-        inner
+{- renderADTParser :: (MonadEval f) => ADT (Parser f a) -> Parser f a -}
 
 
 -- TODO move
