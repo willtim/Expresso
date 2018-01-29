@@ -48,19 +48,29 @@ module Expresso.Eval(
   , mkThunk
   , bind
   -- * Foreign
-  , typeOf
-  , toValue
-  , fromValue
+  {- , typeOf -}
+  {- , toValue -}
+  {- , fromValue -}
   , HasType(..)
   , FromValue(..)
   , ToValue(..)
+
+
+  -- TODO testing
+  , V1(..)
+  , V2(..)
+  , V3(..)
+  , V4(..)
 )
 where
 
 import Data.Hashable
 import Control.Monad.Except hiding (mapM)
+import Control.Monad.State hiding (mapM)
+import Control.Monad.Reader hiding (mapM)
 import Control.Applicative
 import Data.Bifunctor (first)
+import Data.Functor.Compose
 import Data.Foldable (foldrM, toList)
 import Data.Map (Map)
 import Data.HashMap.Strict (HashMap)
@@ -113,6 +123,7 @@ class ApplicativeMonadError String f => MonadEval f where
   force :: Thunk -> f Value
 instance Alternative EvalM where
   EvalM a <|> EvalM b = EvalM (a <|> b)
+  empty = EvalM empty
 instance MonadEval EvalM where
   force = force_
 
@@ -525,9 +536,9 @@ class HasType a => ToValue a where
 -- | Haskell types whose values can be represented by Expresso values.
 class HasType a => FromValue a where
     fromValue :: MonadEval f => Value -> f a
-    default fromValue :: (G.Generic a, GFromValue (G.Rep a), MonadEval f) => Value -> f a
-    {- fromValue = runParser . fmap G.to . renderADTParser . improveADT $ gfromValue defaultOptions Proxy -}
-    fromValue = error "fromValue"
+    default fromValue :: (G.Generic a, ADFor (G.Rep a) ~ Var, GFromValue (G.Rep a), MonadEval f) => Value -> f a
+    fromValue = runParser . fmap G.to . renderADParser $ gfromValue defaultOptions Proxy
+    {- fromValue = error "fromValue" -}
 
 class GHasType f where
     gtypeOf :: Options -> Proxy (f x) -> Either Type (ADT Type)
@@ -576,6 +587,7 @@ fixConsNames (ADT outer) = ADT (g <$> outer)
       Nothing -> False
       _ -> True
 
+
 improveADT :: ADT a -> ADT a
 improveADT = fixConsNames
 
@@ -609,19 +621,15 @@ class NotVar c
 instance NotVar None
 instance NotVar Rec
 
+-- Haskell style ADT
 --
--- NOTE this is just a free alternative with two extra values, e.g.
---   import Control.Alternative.Free.Final(Alt)
---
--- data AddInitTerm a = Init | Term | Neither a
--- data AddField r = AddCons String r | AddSel String r | AddNone r
--- type AD = AD . AddInitTerm
+-- This could be relaxed to normal row-polymorphism by relaxing the constraint on selectors
 data AD :: C -> * -> * where
   Singleton :: a -> AD None a
   -- Constructor/Selector 'resets' the prod/coprod context
   -- FIXME require None or Var
-  Constructor :: NotVar x => String -> AD x a -> AD Var a
-  Selector :: String -> AD None a -> AD Rec a -- A Prod can only contain other Prods, Selector, or Terminal
+  Constructor :: NotVar x   => String -> AD x a -> AD Var a
+  Selector    :: (x ~ None) => String -> AD x a -> AD Rec a -- A Prod can only contain other Prods, Selector, or Terminal
   -- This implies every field has to be named
   Prod :: (a -> b -> c) -> AD Rec a -> AD Rec b -> AD Rec c
   Terminal :: AD Rec a
@@ -680,19 +688,45 @@ renderADTValue (ADT outer)
         (\_ v -> v)
         inner
 
-newtype Parser (f :: * -> *) a = Parser { runParser :: Value -> f a }
-  {- deriving (Functor, Applicative, Monad, MonadError, ApplicativeMonadError, Alternative) -}
+-- Would be a nice implementation, but the (Alternative Compose ...) instance is too restrictive
+--
+-- DerivingVia anyone?
+--
+--     type Parser f = ((->) Value) `Compose` f
+--     _Parser = Compose
+--     runParser = getCompose
+type Parser f = ReaderT Value f
+_Parser = ReaderT
+runParser = runReaderT
 
-deriving instance Functor f => Functor (Parser f)
-instance Applicative f => Applicative (Parser f)
-instance Alternative f => Alternative (Parser f)
+
+{- deriving (Functor, Applicative, Monad, MonadError, ApplicativeMonadError, Alternative) -}
+
+{- deriving instance Functor f => Functor (Parser f) -}
+{- instance Applicative f => Applicative (Parser f) where -}
+  {- pure = Parser . pure . pure -}
+  {- Parser f <*> Parser x = Parser (liftA2 <$> f x) -}
+{- instance Alternative f => Alternative (Parser f) -}
 
 -- NOTE applicative etc
 
 
+nextName :: (Applicative f, MonadState Int f) => f String
+nextName = do
+  st <- get
+  put $ st + 1
+  pure $ "_" <> show st
 
+renderADParser :: MonadEval f => AD Var (Parser f a) -> Parser f a
+renderADParser x = evalState (go x) 0
+  where
+    go :: forall f a . MonadEval f => AD Var (Parser f a) -> State Int (Parser f a)
+    go Initial = pure empty
+    go (Coprod f g x y) = liftA2 (<|>) (go $ f <$> x) (go $ g <$> y)
+    go (Map f x) = go $ fmap f x
 
-{- renderADTParser :: (MonadEval f) => ADT (Parser f a) -> Parser f a -}
+    go x = do
+      pure undefined
 
 
 -- TODO move
@@ -849,15 +883,28 @@ instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
 data V1 a = V1 { s :: a } deriving (G.Generic)
 instance (HasType a) => HasType (V1 a)
 instance (ToValue a) => ToValue (V1 a)
+instance (FromValue a) => FromValue (V1 a)
 data V2 a b = V2 { a :: a, b :: b } deriving (G.Generic)
 instance (HasType a, HasType b) => HasType (V2 a b)
 instance (ToValue a, ToValue b) => ToValue (V2 a b)
+instance (FromValue a, FromValue b) => FromValue (V2 a b)
 data V3 a b c = V3 { x :: a, y :: b, z :: c } deriving (G.Generic)
 instance (HasType a, HasType b, HasType c) => HasType (V3 a b c)
 instance (ToValue a, ToValue b, ToValue c) => ToValue (V3 a b c)
+instance (FromValue a, FromValue b, FromValue c) => FromValue (V3 a b c)
 data V4 a b c d = V4 { m :: a, n :: b, o :: c, p :: d } deriving (G.Generic)
 instance (HasType a, HasType b, HasType c, HasType d) => HasType (V4 a b c d)
 instance (ToValue a, ToValue b, ToValue c, ToValue d) => ToValue (V4 a b c d)
+instance (FromValue a, FromValue b, FromValue c, FromValue d) => FromValue (V4 a b c d)
+
+data Choice0 deriving (G.Generic)
+instance HasType Choice0
+instance ToValue Choice0
+instance FromValue Choice0
+data Choice3 a b c = Choice3_1 a | Choice3_2 b | Choice3_3 c deriving (G.Generic)
+instance (HasType a, HasType b, HasType c) => HasType (Choice3 a b c)
+instance (ToValue a, ToValue b, ToValue c) => ToValue (Choice3 a b c)
+instance (FromValue a, FromValue b, FromValue c) => FromValue (Choice3 a b c)
 
 
 _Id :: f x -> G.M1 t c f x
@@ -879,13 +926,13 @@ instance GFromValue f => GFromValue (G.D1 c f) where
   gfromValue opts p = fmap (fmap _Id) $ gfromValue opts (runId <$> p)
 instance FromValue c => GFromValue (G.K1 t c) where
   type ADFor (G.K1 t c) = None
-  gfromValue opts p = Singleton $ fmap _Const $ Parser fromValue
+  gfromValue opts p = Singleton $ fmap _Const $ _Parser fromValue
 instance GFromValue G.U1 where
   type ADFor G.U1 = Rec
   gfromValue opts p = Terminal
 instance GFromValue G.V1 where
-  type ADFor G.V1 = Rec
-  gfromValue opts p = Terminal
+  type ADFor G.V1 = Var
+  gfromValue opts p = Initial
 instance (GFromValue f, GFromValue g, ADFor f ~ Var, ADFor g ~ Var) => GFromValue (f G.:+: g) where
   type ADFor (f G.:+: g) = Var
   gfromValue opts p = Coprod (fmap G.L1) (fmap G.R1) (gfromValue opts lp) (gfromValue opts rp)
