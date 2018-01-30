@@ -22,12 +22,11 @@ Library
                    Expresso.Pretty
                    Expresso.Utils
 
-  ghc-options: -O2 -Wall -fwarn-tabs -funbox-strict-fields
-               -fno-warn-orphans
-               -fno-warn-unused-do-bind
-               -fno-warn-name-shadowing
-               -fno-warn-name-shadowing
-               -fno-warn-missing-pattern-synonym-signatures
+  ghc-options:     -O2 -Wall -fwarn-tabs -funbox-strict-fields
+                   -fno-warn-orphans
+                   -fno-warn-unused-do-bind
+                   -fno-warn-name-shadowing
+                   -fno-warn-missing-pattern-synonym-signatures
 
 Executable expresso
   Main-Is:         Repl.hs

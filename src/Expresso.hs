@@ -31,6 +31,9 @@ import Data.Monoid
 import Control.Applicative
 
 import Expresso.Eval (Env, EvalM, FromValue(..), Value(..), runEvalM)
+{- ======= -}
+{- import Expresso.Eval (Env, EvalM, HasValue(..), Value(..), runEvalM) -}
+{- >>>>>>> tim/master -}
 import Expresso.TypeCheck (TIState, initTIState)
 import Expresso.Pretty (render)
 import Expresso.Syntax
@@ -59,9 +62,16 @@ evalWithEnv
     => (TypeEnv, TIState, Env)
     -> ExpI
     -> IO (Either String a)
+{- <<<<<<< HEAD -}
 evalWithEnv env expr = runExceptT $ do
   v <- ExceptT $ evalWithEnv' env expr
   ExceptT $ runEvalM $ Eval.fromValue v
+{- ======= -}
+{- evalWithEnv (tEnv, tState, env) ei = runExceptT $ do -}
+  {- e      <- Parser.resolveImports ei -}
+  {- _sigma <- ExceptT . return $ inferTypes tEnv tState e -}
+  {- ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e -}
+{- >>>>>>> tim/master -}
 
 evalWithEnv'
     :: (TypeEnv, TIState, Env)

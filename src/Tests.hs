@@ -28,9 +28,12 @@ unitTests = testGroup
   , relationalTests
   , constraintTests
   , rankNTests
+
   , foreignTypeTests
   , foreignImportTests
   , foreignExportTests
+
+  , lazyTests
   ]
 
 letTests = testGroup
@@ -38,6 +41,7 @@ letTests = testGroup
   [ hasValue "let x = 1 in x" (1::Integer)
   , hasValue "let x = 1 in let y = 2 in x + y" (3::Integer)
   , hasValue "let x = 1; y = 2 in x + y" (3::Integer)
+
   , hasValue "let {..} = {inc = \\x -> x + 1} in inc 1" (2::Integer)
   , hasValue "let m = {inc = \\x -> x + 1} in m.inc 1" (2::Integer)
 
@@ -52,6 +56,21 @@ letTests = testGroup
 
     -- Num constraint violation
   , illTyped "let square = \\x -> x * x in {foo = square 1, bar = square [1]}"
+
+  , hasValue "let {..} = {inc = x -> x + 1} in inc 1" (2::Integer)
+  , hasValue "let m = {inc = x -> x + 1} in m.inc 1" (2::Integer)
+
+  , hasValue "let m = {id = x -> x} in {foo = [m.id 1], bar = m.id [1]}"
+        ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+
+  -- Record argument field-pun generalisation
+  , hasValue "let {id} = {id = x -> x} in {foo = [id 1], bar = id [1]}"
+        ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+  , hasValue "let {..} = {id = x -> x} in {foo = [id 1], bar = id [1]}"
+        ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+
+    -- Num constraint violation
+  , illTyped "let square = x -> x * x in {foo = square 1, bar = square [1]}"
   ]
 
 lambdaTests = testGroup
@@ -61,6 +80,11 @@ lambdaTests = testGroup
   , illTyped "\\x -> x x"
   , illTyped "let absorb = fix (\\r x -> r) in absorb"
   , illTyped "let create = fix (\\r x -> r x x) in create"
+  , hasValue "(x -> y -> x + y) 1 2" (3::Integer)
+  , hasValue "(x y -> x + y) 1 2" (3::Integer)
+  , illTyped "x -> x x"
+  , illTyped "let absorb = fix (r x -> r) in absorb"
+  , illTyped "let create = fix (r x -> r x x) in create"
   ]
 
 recordTests = testGroup
@@ -72,6 +96,14 @@ recordTests = testGroup
 
   -- Row tail unification soundness
   , illTyped "\\r -> if True then { x = 1 | r } else { y = 2 | r }"
+
+  , hasValue "({x, y} -> {x, y}) {x=1, y=2}" $ toMap ["x"-->(1::Integer), "y"-->2]
+  , hasValue "{x = 1, y = 2}" $ toMap ["x"-->(1::Integer), "y"-->2]
+  , hasValue "(r -> { x = 1, y = 2 | r}) { z = 3 }" $ toMap ["x"-->(1::Integer), "y"-->2, "z"-->3]
+  , hasValue "{ x = { y = { z = 42 }}}.x.y.z" (42::Integer)
+
+  -- Row tail unification soundness
+  , illTyped "r -> if True then { x = 1 | r } else { y = 2 | r }"
 
   , illTyped "{ x = 2, x = 1 }.x" -- fails to typecheck
   , illTyped "{ x = 2 | { x = 1 }}.x" -- fails to typecheck
@@ -86,6 +118,7 @@ recordTests = testGroup
   -- large record
   , hasValue ("{ x = True }.x") True
   , hasValue ("{ x = 2" ++ concat [", x" ++ show n ++ " = 1" | n <- [1..129] ] ++ " }.x") (2::Integer)
+  , hasValue "({| x := 42, y = 2 |} << {| x = 1 |}) {}" ["x"-->(42::Integer), "y"-->2]
   ]
 
 variantTests = testGroup
@@ -139,6 +172,15 @@ constraintTests = testGroup
   , illTyped "let f = x y -> x + y in f True False"
   ]
 
+
+lazyTests = testGroup
+  "Lazy evaluation tests using error primitive"
+  [ hasValue "maybe (error \"bang!\") (x -> x == 42) (Just 42)" True
+  , hasValue "{ x = error \"boom!\", y = 42 }.y" (42::Integer)
+  , hasValue "case Bar (error \"fizzle!\") of { Foo{} -> 0 | otherwise -> 42 }" (42::Integer)
+  ]
+
+
 rankNTests = testGroup
   "Rank-N polymorphism"
   [ hasValue
@@ -146,6 +188,8 @@ rankNTests = testGroup
   , hasValue
          "let k = \\f g x -> f (g x) in let t = k (\\{} -> True) (\\x -> {}) False in let xx = k (\\a -> {}) (\\x -> {}) in t" True
 
+  , hasValue "let f = (g : forall a. a -> a) -> {l = g True, r = g 1} in f (x -> x) == {l = True, r = 1}" True
+  , hasValue "let f = g -> {l = g True, r = g 1} : (forall a. a -> a) -> {l : Bool, r : Int } in f (x -> x) == {l = True, r = 1}" True , hasValue "let f = (m : forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = m.reverse \"abc\" } in f (import \"Prelude.x\") == {l = [False, True], r = \"cba\"}" True
   -- FIXME breaks due to parser bug
   {- , hasValue -}
          {- "let f = (\\g -> {l = g True, r = g 1}) ::: ((forall a. a -> a) -> {l : Bool, r : Int }) in f (\\x -> x) == {l = True, r = 1}" True -}
@@ -153,7 +197,6 @@ rankNTests = testGroup
          {- "let f = \\(m ::: forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = m.reverse \"abc\" } in f (import \"Prelude.x\") == {l = [False, True], r = \"cba\"}" True -}
   ]
 
--- TODO test laziness/recursion
 
 -- Marshalling
 data Rat = Rat { nom :: Integer, denom :: Integer } | Simple Integer deriving (Generic)

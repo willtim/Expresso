@@ -16,6 +16,17 @@ import Text.PrettyPrint.ANSI.Leijen ( Doc, (<+>), (<//>), angles, braces, bracke
 import qualified Text.PrettyPrint.ANSI.Leijen as PP
 {- import Data.Monoid -}
 
+{- ======= -}
+{- import Data.String -}
+{- import Text.PrettyPrint.Leijen ( Doc, (<+>), (<//>), angles, braces, brackets -}
+                               {- , comma, dot, dquotes, hcat, hsep, indent -}
+                               {- , int, integer, double, parens, space, text, string, vcat) -}
+{- import qualified Text.PrettyPrint.Leijen as PP -}
+
+
+{- instance IsString Doc where -}
+  {- fromString = text -}
+{- >>>>>>> tim/master -}
 
 {- instance IsString Doc where -}
   {- fromString = text -}

@@ -1,5 +1,4 @@
 resolver: lts-9.14
-# resolver: lts-2.22
 packages:
 - '.'
 extra-deps: []
