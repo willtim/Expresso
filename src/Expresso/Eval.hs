@@ -1060,18 +1060,6 @@ instance (HasType a, HasType b, HasType c, HasType d) => HasType (a, b, c, d)
 -- TODO Vector/Set (as []), map as [Entry]
 
 
-{- FIXME move -}
-{- <Leaf:Int | <Node:{left:Int,right:[Int]} | <>>> -}
-{- data Foo a = Leaf a | Node { left :: a, right :: a } -}
-  {- deriving G.Generic -}
-{- instance (HasType a) => HasType (Foo a) -}
-{- instance ToValue a => ToValue (Foo a) -}
-{- instance FromValue a => FromValue (Foo a) -}
-
-{- data Tree a = TLeaf a | TNode { tleft :: a, tright :: Tree a } -}
-  {- deriving G.Generic -}
-{- instance (HasType a) => HasType (Tree a) -}
-{- instance ToValue a => ToValue (Foo a) -}
 
 inside :: proxy (f a) -> Proxy a
 inside = const Proxy
@@ -1163,7 +1151,6 @@ instance FromValue a => FromValue [a] where
 fromValueL fromValue (VList xs) = mapM fromValue xs
 fromValueL _         v          = failfromValue "VList" v
 
--- FIXME carry EvalM type in class to make this safe
 instance (ToValue a, FromValue b) => FromValue (a -> b) where
     fromValue (VLam f) = fmap (fmap $ either (error "unexpected") id) $ pure $ \x -> runEvalM' $ do
       x <- (mkThunk $ pure $ toValue x)
@@ -1172,13 +1159,6 @@ instance (ToValue a, FromValue b) => FromValue (a -> b) where
     fromValue v           = failfromValue "VLam" v
 
 
--- FIXME remove
--- | A record where all fields have the same type.
-instance HasType a => HasType (HashMap Name a) where
-    typeOf = error "Impossible: FIXME rewrite tests to use real HS records instead of faking it"
-instance FromValue a => FromValue (HashMap Name a) where
-    fromValue (VRecord m) = mapM fromValue' m
-    fromValue v           = failfromValue "VRecord" v
 
 
 fromValueRTh (VRecord m) = return m

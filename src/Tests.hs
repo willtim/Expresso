@@ -73,13 +73,13 @@ letTests = testGroup
   , hasValue "let m = {inc = x -> x + 1} in m.inc 1" (2::Integer)
 
   , hasValue "let m = {id = x -> x} in {foo = [m.id 1], bar = m.id [1]}"
-        ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+        (re2 [1] [1] :: Re '[ '("bar",[Int]),'("foo",[Int]) ] )
 
   -- Record argument field-pun generalisation
   , hasValue "let {id} = {id = x -> x} in {foo = [id 1], bar = id [1]}"
-        ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+        (re2 [1] [1] :: Re '[ '("bar",[Int]),'("foo",[Int]) ] )
   , hasValue "let {..} = {id = x -> x} in {foo = [id 1], bar = id [1]}"
-        ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+        (re2 [1] [1] :: Re '[ '("bar",[Int]),'("foo",[Int]) ] )
 
     -- Num constraint violation
   , illTyped "let square = x -> x * x in {foo = square 1, bar = square [1]}"
@@ -101,19 +101,39 @@ lambdaTests = testGroup
   , illTyped "let create = fix (r x -> r x x) in create"
   ]
 
+
+instance Functor (FI s) where
+  fmap f (FI x) = FI (f x)
+instance KnownSymbol s => Applicative (FI s) where
+  pure x = FI x
+  FI f <*> FI x = FI (f x)
+
+type Re = FieldRec
+re1 x = pure x & RNil
+re2 x y = pure x & re1 y
+re3 x y z = pure x & re2 y z
+
 recordTests = testGroup
   "Record expressions"
-  [ hasValue "(\\{x, y} -> {x, y}) {x=1, y=2}" $ toMap ["x"-->(1::Integer), "y"-->2]
-  , hasValue "{x = 1, y = 2}" $ toMap ["x"-->(1::Integer), "y"-->2]
-  , hasValue "(\\r -> { x = 1, y = 2 | r}) { z = 3 }" $ toMap ["x"-->(1::Integer), "y"-->2, "z"-->3]
-  , hasValue "{ x = { y = { z = 42 }}}.x.y.z" (42::Integer)
+  [ hasValue "({x, y} -> {x, y}) {x=1, y=2}" $
+    (re2 1 2 :: Re ['("x", Integer),'("y", Integer)])
+
+  , hasValue "{x = 1, y = 2}"
+    (re2 1 2 :: Re ['("x", Integer),'("y", Integer)])
+  , hasValue "(r -> { x = 1, y = 2 | r}) { z = 3 }"
+    (re3 1 2 3 :: Re ['("x", Integer),'("y", Integer), '("z", Integer)])
+  , hasValue "{ x = { y = { z = 42 }}}.x.y.z"
+    (42::Integer)
 
   -- Row tail unification soundness
-  , illTyped "\\r -> if True then { x = 1 | r } else { y = 2 | r }"
+  , illTyped "r -> if True then { x = 1 | r } else { y = 2 | r }"
 
-  , hasValue "({x, y} -> {x, y}) {x=1, y=2}" $ toMap ["x"-->(1::Integer), "y"-->2]
-  , hasValue "{x = 1, y = 2}" $ toMap ["x"-->(1::Integer), "y"-->2]
-  , hasValue "(r -> { x = 1, y = 2 | r}) { z = 3 }" $ toMap ["x"-->(1::Integer), "y"-->2, "z"-->3]
+  , hasValue "({x, y} -> {x, y}) {x=1, y=2}"
+    (re2 1 2 :: Re ['("x", Integer),'("y", Integer)])
+  , hasValue "{x = 1, y = 2}"
+    (re2 1 2 :: Re ['("x", Integer),'("y", Integer)])
+  , hasValue "(r -> { x = 1, y = 2 | r}) { z = 3 }"
+    (re3 1 2 3 :: Re ['("x", Integer),'("y", Integer), '("z", Integer)])
   , hasValue "{ x = { y = { z = 42 }}}.x.y.z" (42::Integer)
 
   -- Row tail unification soundness
@@ -123,16 +143,21 @@ recordTests = testGroup
   , illTyped "{ x = 2 | { x = 1 }}.x" -- fails to typecheck
   , hasValue "{ x := 2, x = 1 }.x" (2::Integer)
   , hasValue "{ x := 2 | { x = 1 }}.x" (2::Integer)
-  , hasValue "{| x = 1 |} {}" $ toMap ["x"-->(1::Integer)]
-  , hasValue "({| x = 1, y = 2 |} >> {| z = 3 |}) {}" $ toMap ["x"-->(1::Integer), "y"-->2, "z"-->3]
-  , hasValue "({| x = 1, y = 2 |} >> {| x := 42 |}) {}" $ toMap ["x"-->(42::Integer), "y"-->2]
+  , hasValue "{| x = 1 |} {}"
+    (re1 1 :: Re '[ '("x", Integer)])
+  , hasValue "({| x = 1, y = 2 |} >> {| z = 3 |}) {}"
+    (re3 1 2 3 :: Re ['("x", Integer),'("y", Integer), '("z", Integer)])
+  , hasValue "({| x = 1, y = 2 |} >> {| x := 42 |}) {}"
+    (re2 42 2 :: Re ['("x", Integer),'("y", Integer)])
   , illTyped "({| x = 1, y = 2 |} << {| x := 42 |}) {}" -- fails to typecheck
-  , hasValue "({| x := 42, y = 2 |} << {| x = 1 |}) {}" $ toMap ["x"-->(42::Integer), "y"-->2]
+  , hasValue "({| x := 42, y = 2 |} << {| x = 1 |}) {}"
+    (re2 42 2 :: Re ['("x", Integer),'("y", Integer)])
 
   -- large record
   , hasValue ("{ x = True }.x") True
   , hasValue ("{ x = 2" ++ concat [", x" ++ show n ++ " = 1" | n <- [1..129] ] ++ " }.x") (2::Integer)
-  , hasValue "({| x := 42, y = 2 |} << {| x = 1 |}) {}" ["x"-->(42::Integer), "y"-->2]
+  , hasValue "({| x := 42, y = 2 |} << {| x = 1 |}) {}"
+    (re2 42 2 :: Re ['("x", Integer),'("y", Integer)])
   ]
 
 variantTests = testGroup
@@ -198,17 +223,17 @@ lazyTests = testGroup
 rankNTests = testGroup
   "Rank-N polymorphism"
   [ hasValue
-         "let f = \\(g ::: forall a. a -> a) -> {l = g True, r = g 1} in f (\\x -> x) == {l = True, r = 1}" True
+         "let f = (g : forall a. a -> a) -> {l = g True, r = g 1} in f (x -> x) == {l = True, r = 1}" True
   , hasValue
-         "let k = \\f g x -> f (g x) in let t = k (\\{} -> True) (\\x -> {}) False in let xx = k (\\a -> {}) (\\x -> {}) in t" True
+         "let k = f g x -> f (g x) in let t = k ({} -> True) (x -> {}) False in let xx = k (a -> {}) (x -> {}) in t" True
 
   , hasValue "let f = (g : forall a. a -> a) -> {l = g True, r = g 1} in f (x -> x) == {l = True, r = 1}" True
   , hasValue "let f = g -> {l = g True, r = g 1} : (forall a. a -> a) -> {l : Bool, r : Int } in f (x -> x) == {l = True, r = 1}" True , hasValue "let f = (m : forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = m.reverse \"abc\" } in f (import \"Prelude.x\") == {l = [False, True], r = \"cba\"}" True
   -- FIXME breaks due to parser bug
   {- , hasValue -}
-         {- "let f = (\\g -> {l = g True, r = g 1}) ::: ((forall a. a -> a) -> {l : Bool, r : Int }) in f (\\x -> x) == {l = True, r = 1}" True -}
+         {- "let f = (g -> {l = g True, r = g 1}) ::: ((forall a. a -> a) -> {l : Bool, r : Int }) in f (x -> x) == {l = True, r = 1}" True -}
   {- , hasValue -}
-         {- "let f = \\(m ::: forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = m.reverse \"abc\" } in f (import \"Prelude.x\") == {l = [False, True], r = \"cba\"}" True -}
+         {- "let f = (m ::: forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = m.reverse \"abc\" } in f (import \"Prelude.x\") == {l = [False, True], r = \"cba\"}" True -}
   ]
 
 
@@ -390,8 +415,3 @@ illTyped str = testCase str $ do
 
 assertTrue = return ()
 
-(-->) :: FromValue a => Name -> a -> (Name, a)
-(-->) l v = (l, v)
-
-toMap :: (Eq a, Show a, FromValue a) => [(Name, a)] -> HashMap Name a
-toMap = HashMap.fromList
