@@ -48,10 +48,7 @@ module Expresso.Eval(
   , force
   , mkThunk
   , bind
-  -- * Foreign
-  {- , typeOf -}
-  {- , toValue -}
-  {- , fromValue -}
+
   , HasType(..)
   , FromValue(..)
   , ToValue(..)
@@ -105,9 +102,10 @@ import Data.Traversable
 #endif
 
 
-import Debug.Trace
+{- import Debug.Trace -}
 
--- call-by-need environment
+-- |
+-- Call-by-need environment
 -- A HashMap makes it easy to support record wildcards
 type Env = HashMap Name Thunk
 
@@ -134,16 +132,6 @@ instance Show Thunk where
 
 mkThunk :: EvalM Value -> EvalM Thunk
 mkThunk = return . Thunk
--- mkThunk (EvalM ev) = EvalM $ do
---   ref <- lift $ newSTRef Nothing
---   return $ Thunk $ EvalM $ do
---       mv <- lift $ readSTRef ref
---       case mv of
---           Nothing -> do
---               v <- ev
---               lift $ writeSTRef ref (Just v)
---               return v
---           Just v  -> return v
 
 data Value
   = VLam     !(Thunk -> EvalM Value)
@@ -151,7 +139,6 @@ data Value
   | VDbl     !Double
   | VBool    !Bool
   | VChar    !Char
-  {- | VString  !String  -- an optimisation -}
   | VMaybe   !(Maybe Value)
   | VList    ![Value] -- lists are strict
   | VRecord  !(HashMap Label Thunk) -- field order no defined
@@ -160,12 +147,8 @@ data Value
 instance Show Value where
   show = showR . runEvalM' . ppValue'
 
-{- applyV :: Value -> Value -> EvalM Value -}
-{- applyV (VLam f) x = f (valueToThunk x) -}
-  {- where -}
 valueToThunk :: Value -> Thunk
 valueToThunk = Thunk . pure
-{- applyV f x = throwError $ "Not a function: " -- TODO ++ show f -}
 
 -- | This does *not* evaluate deeply
 ppValue :: Value -> Doc
@@ -175,7 +158,6 @@ ppValue (VDbl  d)   = double d
 ppValue (VBool b)   = if b then "True" else "False"
 ppValue (VChar c)   = text $ c : []
 ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppParensValue v) mx
-{- ppValue (VString s) = string (show s) -}
 ppValue (VList xs)
     | Just str <- mapM extractChar xs = string $ show str
     | otherwise     = bracketsList $ map ppValue xs
@@ -254,21 +236,13 @@ evalPrim pos p = case p of
     Dbl d         -> VDbl d
     Bool b        -> VBool b
     Char c        -> VChar c
-    {- String s      -> VString s -}
     String s      -> VList (fmap VChar s)
     Show          -> mkStrictLam $ \v -> string . show <$> ppValue' v
       where
-        {- string = VString -}
         string = VList . fmap VChar
-    -- Trace
     ErrorPrim     -> VLam $ \s -> do
-{- <<<<<<< HEAD -}
         msg <- fromValue' s
         throwError $ "error (" ++ show pos ++ "):" ++ msg
-{- ======= -}
-        {- msg <- proj' s -}
-        {- throwError $ "error (" ++ show pos ++ "): " ++ msg -}
-{- >>>>>>> tim/master -}
 
     ArithPrim Add -> mkStrictLam2 $ numOp pos (+)
     ArithPrim Sub -> mkStrictLam2 $ numOp pos (-)
@@ -432,13 +406,6 @@ equalValues _ (VInt i1)    (VInt i2)    = return $ i1 == i2
 equalValues _ (VDbl d1)    (VDbl d2)    = return $ d1 == d2
 equalValues _ (VBool b1)   (VBool b2)   = return $ b1 == b2
 equalValues _ (VChar c1)   (VChar c2)   = return $ c1 == c2
-{- equalValues _ (VString s1) (VString s2) = return $ s1 == s2 -}
-{- equalValues p v@VString{}  (VList xs)   = do -}
-    {- v' <- toString p xs -}
-    {- equalValues p v v' -}
-{- equalValues p (VList xs)   v@VString{}  = do -}
-    {- v' <- toString p xs -}
-    {- equalValues p v' v -}
 equalValues p (VList xs)   (VList ys)
     | length xs == length ys = and <$> zipWithM (equalValues p) xs ys
     | otherwise = return False
@@ -464,13 +431,6 @@ compareValues _ (VInt i1)    (VInt i2)    = return $ compare i1 i2
 compareValues _ (VDbl d1)    (VDbl d2)    = return $ compare d1 d2
 compareValues _ (VBool b1)   (VBool b2)   = return $ compare b1 b2
 compareValues _ (VChar c1)   (VChar c2)   = return $ compare c1 c2
-{- compareValues _ (VString s1) (VString s2) = return $ compare s1 s2 -}
-{- compareValues p v@VString{}  (VList xs)   = do -}
-    {- v' <- toString p xs -}
-    {- compareValues p v v' -}
-{- compareValues p (VList xs)   v@VString{}  = do -}
-    {- v' <- toString p xs -}
-    {- compareValues p v' v -}
 compareValues p (VList xs)   (VList ys)   = go xs ys
   where
     go :: [Value] -> [Value] -> EvalM Ordering
@@ -495,32 +455,14 @@ recordValues :: HashMap Label a -> [(Label, a)]
 recordValues = List.sortBy (comparing fst) . HashMap.toList
 
 
--- | Optimise a list of chars
-{- toString :: Pos -> [Value] -> EvalM Value -}
-{- toString pos xs -}
-    {- | Just cs <- mapM extractChar xs = return $ VString cs -}
-    {- | otherwise = failOnValues pos xs -}
 
-----------------
 
--- data TValue a where
-  -- Value -> Type -> TValue a
-
--- TODO version of eval that returns a typed expression (using phantoms : monotypes only)
--- This should allow us to write a safe:
+-- |
+-- How to marshall Haskell contructors and selectors into Expresso types.
 --
---   instance (ToValue a, FromValue b) => FromValue (a -> b) where
---      fromValueSafe :: MonadEval f => TypedValue (a -> b) -> f (a -> b)
---   toValueSafe :: ToValue a => a -> TypedValue a
---   refineValue :: ApplicativeError ... f => Value -> (forall a . TypedValue a -> f r) -> f r
---   unrefineValue :: TypedValue a -> Value
-
-------------------------------------------------------------
--- FromValue class and instances
-
--- | How to marshall Haskell contructors and selectors into Expresso types.
--- TODO we just do something default for now
+-- Included to make it easier to add options later...
 data Options = Options
+
 defaultOptions :: Options
 defaultOptions = Options
 
@@ -632,7 +574,6 @@ instance NotVar Rec
 data AD :: C -> (* -> *) -> * -> * where
   Singleton :: f a -> AD None f a
   -- Constructor/Selector 'resets' the prod/coprod context
-  -- FIXME require None or Var
   Constructor :: NotVar x   => String -> AD x f a -> AD Var f a
   Selector    :: (x ~ None) => String -> AD x f a -> AD Rec f a -- A Prod can only contain other Prods, Selector, or Terminal
   -- This implies every field has to be named
@@ -675,21 +616,6 @@ instance Functor f => Functor (AD x f) where
   fmap f (Prod g a b) = Prod (\a b -> f $ g a b) a b
   fmap f (Coprod g h a b) = Coprod (f . g) (f . h) a b
 
-  -- TODO can probably be restricted to (AD Var)
-  {- Map :: (a -> b) -> AD x a -> AD x b -}
-  {- LiftA2 :: (a -> b -> c) -> AD x a -> AD x b -> AD x c -}
-{- instance Functor (AD x) where -}
-  {- fmap = Map -}
-
-{- ad1 = Coprod id id -}
-  {- (Constructor "A" $ Singleton "Int") -}
-  {- (Constructor "B" -}
-    {- (Prod const -}
-      {- (Selector "Bool" $ Singleton "Int") -}
-      {- (Prod const -}
-        {- Terminal -}
-        {- (Selector "Bool" $ Singleton "Bool")))) -}
-{- ad2 = Prod const (Selector "A" ad1) (Selector "B" ad1) -}
 
 renderADT :: ADT Type -> Type
 renderADT (ADT outer)
@@ -739,15 +665,6 @@ _Parser = ReaderT
 runParser = runReaderT
 
 
-{- deriving (Functor, Applicative, Monad, MonadError, ApplicativeMonadError, Alternative) -}
-
-{- deriving instance Functor f => Functor (Parser f) -}
-{- instance Applicative f => Applicative (Parser f) where -}
-  {- pure = Parser . pure . pure -}
-  {- Parser f <*> Parser x = Parser (liftA2 <$> f x) -}
-{- instance Alternative f => Alternative (Parser f) -}
-
--- NOTE applicative etc
 
 intoRecord :: (Applicative f, MonadState RecNames f) => f ()
 intoRecord = put $ RecNames 1
@@ -765,7 +682,7 @@ chooseP :: Alternative f => Parser f a -> Parser f a -> Parser f a
 chooseP = (<|>)
 
 -- FIXME
-traceP x = trace (show x) x
+{- traceP x = trace (show x) x -}
 
 
 data RecNames
@@ -798,7 +715,7 @@ fixADNames x = evalState (go x) RecNamesInit
     go' x@Constructor{} = go x
 
 renderADParser :: MonadEval f => AD Var (Parser f) a -> Parser f a
-renderADParser x = evalState (go $ traceP x) 0
+renderADParser x = evalState (go x) 0
   where
     go :: forall f a . MonadEval f => AD Var (Parser f) a -> State Int (Parser f a)
     go Initial = pure empty
@@ -1022,12 +939,12 @@ instance (FromValue a, FromValue b, FromValue c) => FromValue (Choice3 a b c)
 
 -- TODO test
 roundTrip :: (ToValue a, FromValue a) => a -> Either String a
-roundTrip = runEvalM' . fromValue . traceV . toValue
+roundTrip = runEvalM' . fromValue . toValue
 
 
 -- FIXME debug
-traceV :: Value -> Value
-traceV x = trace (showR . runEvalM' $ ppValue' x) x
+{- traceV :: Value -> Value -}
+{- traceV x = trace (showR . runEvalM' $ ppValue' x) x -}
   where
 showR (Right x) = show x
 showR (Left e) = "<<Error:" <> show e <> ">>"
