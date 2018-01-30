@@ -61,6 +61,7 @@ module Expresso.Eval(
   , V2(..)
   , V3(..)
   , V4(..)
+  , roundTrip
 )
 where
 
@@ -155,6 +156,9 @@ data Value
   | VRecord  !(HashMap Label Thunk) -- field order no defined
   | VVariant !Label !Thunk
 
+instance Show Value where
+  show = showR . runEvalM' . ppValue'
+
 {- applyV :: Value -> Value -> EvalM Value -}
 {- applyV (VLam f) x = f (valueToThunk x) -}
   {- where -}
@@ -174,7 +178,7 @@ ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppParensValue v) mx
 ppValue (VList xs)
     | Just str <- mapM extractChar xs = string $ show str
     | otherwise     = bracketsList $ map ppValue xs
-ppValue (VRecord m) = bracesList $ map ppEntry $ HashMap.keys m
+ppValue (VRecord m) = bracesList $ map ppEntry $ List.sort $ HashMap.keys m
   where
     ppEntry l = text l <+> "=" <+> "<Thunk>"
 ppValue (VVariant l _) = text l <+> "<Thunk>"
@@ -639,6 +643,28 @@ data AD :: C -> (* -> *) -> * -> * where
   Coprod :: (a -> c) -> (b -> c) -> AD Var f a -> AD Var f b -> AD Var f c
   Initial :: AD Var f a
 
+data AD' where
+  Singleton' :: AD'
+  Constructor' :: String -> AD' -> AD'
+  Selector' :: String -> AD' -> AD'
+  Prod' :: AD' -> AD' -> AD'
+  Coprod' :: AD' -> AD' -> AD'
+  Initial' :: AD'
+  Terminal' :: AD'
+  deriving (Show)
+
+instance Show (AD x f a) where
+  show = show . go
+    where
+      go :: forall x f a . AD x f a -> AD'
+      go (Singleton _) = Singleton'
+      go (Constructor n a) = Constructor' n $ go a
+      go (Selector n a) = Selector' n $ go a
+      go (Prod _ a b) = Prod' (go a) (go b)
+      go (Coprod _ _ a b) = Coprod' (go a) (go b)
+      go Initial = Initial'
+      go Terminal{} = Terminal'
+
 instance Functor f => Functor (AD x f) where
   fmap f (Singleton fa) = Singleton $ fmap f fa
   fmap f (Constructor n x) = Constructor n (fmap f x)
@@ -705,6 +731,8 @@ renderADTValue (ADT outer)
 --     type Parser f = ((->) Value) `Compose` f
 --     _Parser = Compose
 --     runParser = getCompose
+
+-- FIXME when composed with EvalM, this concatenates error messages...
 type Parser f = ReaderT Value f
 _Parser = ReaderT
 runParser = runReaderT
@@ -727,17 +755,25 @@ nextName = do
   put $ st + 1
   pure $ "_" <> show st
 
+chooseP :: Alternative f => Parser f a -> Parser f a -> Parser f a
+chooseP = (<|>)
+
+-- FIXME
+traceP x = trace (show x) x
+
 renderADParser :: MonadEval f => AD Var (Parser f) a -> Parser f a
-renderADParser x = evalState (go x) 0
+renderADParser x = evalState (go $ traceP x) 0
   where
     go :: forall f a . MonadEval f => AD Var (Parser f) a -> State Int (Parser f a)
     go Initial = pure empty
-    go (Coprod f g x y) = liftA2 (<|>) (go $ f <$> x) (go $ g <$> y)
-    go (Constructor k x) = do
-      p <- go' x
+    go (Coprod f g x y) = liftA2 (chooseP) (fmap f <$> go x) (fmap g <$> go y)
+    go (Constructor k a) = do
+      p <- go' a
       pure $ _Parser $ \x -> case x of
-        (VVariant n th) | n == k -> runParser p x
-        _ -> throwError "Bad variant"
+        (VVariant n th) | n == k -> do
+          y <- force th
+          runParser p y
+        _ -> throwError $ "Bad variant, wanted " <> k <> " got (" <> show (ppValue x) <> ")"
 
     go' :: forall f x a . MonadEval f => AD x (Parser f) a -> State Int (Parser f a)
     go' (Singleton p) = pure p
@@ -755,9 +791,9 @@ renderADParser x = evalState (go x) 0
             v <- force th
             runParser p v
           _ -> fail k m
-        _ -> throwError "Not a record"
+        _ -> throwError $ "Not a record, wanted '"<> k <>"', got (" <> (showR $ runEvalM' $ ppValue' x) <> ")"
       where
-        fail k m = throwError $ "Bad record, wanted " <> k <> ", got only " <> show (HashMap.keys m)
+        fail k m = throwError $ "Bad record, wanted '" <> k <> "', got rec with keys " <> show (HashMap.keys m)
 
     go' x@Initial{} = go x
     go' x@Coprod{} = go x
@@ -948,7 +984,15 @@ instance (FromValue a, FromValue b, FromValue c) => FromValue (Choice3 a b c)
 
 -- TODO test
 roundTrip :: (ToValue a, FromValue a) => a -> Either String a
-roundTrip = runEvalM' . fromValue . toValue
+roundTrip = runEvalM' . fromValue . traceV . toValue
+
+
+-- FIXME debug
+traceV :: Value -> Value
+traceV x = trace (showR . runEvalM' $ ppValue' x) x
+  where
+showR (Right x) = show x
+showR (Left e) = "<<Error:" <> show e <> ">>"
 
 
 _Id :: f x -> G.M1 t c f x
@@ -1080,6 +1124,7 @@ codom = inside
 instance ToValue () where
     toValue _ = VRecord mempty
 instance ToValue Void
+instance FromValue Void
 
 -- TODO derive
 instance ToValue Bool where
@@ -1098,6 +1143,9 @@ instance ToValue a => ToValue (Maybe a) where
     toValue = VMaybe . fmap toValue
 instance ToValue a => ToValue [a] where
     toValue = VList . fmap toValue
+
+instance (ToValue a, ToValue b) => ToValue (Either a b)
+instance (FromValue a, FromValue b) => FromValue (Either a b)
 
 instance FromValue () where
     fromValue _ = pure ()
