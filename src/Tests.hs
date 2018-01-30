@@ -1,5 +1,6 @@
 
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE FlexibleContexts #-}
 module Main where
 
 import Test.Tasty (TestTree, defaultMain, testGroup)
@@ -263,6 +264,10 @@ foreignExportTests = testGroup
   , hasValue "\"hello\"" "hello"
   , hasValue "{}" ()
   , hasValue "Just 2" (Just (2 :: Int))
+
+
+  -- Mono id function
+  , hasValueF "x -> x" (2 :: Int) (2 :: Int)
   ]
 
 xx :: Proxy a
@@ -291,13 +296,23 @@ isValue expected hsVal = testCase caseStr $
     actual = show $ ppValue $ toValue hsVal
     caseStr = expected
 
+
 -- | Test that a given Expresso expression can be evaluated and exported to Haskell.
 hasValue :: (Eq a, Show a, FromValue a) => String -> a -> TestTree
-hasValue str expected = testCase str $ do
+hasValue str = hasValue' str id
+
+
+-- | Test that a given Expresso expected evalutates to a function, which when applied
+-- to the given value returns the given result.
+hasValueF :: (Eq b, Show b, FromValue (a -> b)) => String -> a -> b -> TestTree
+hasValueF str arg = hasValue' str ($ arg)
+
+hasValue' :: (Eq b, Show b, FromValue a) => String -> (a -> b) -> b -> TestTree
+hasValue' str f expected = testCase str $ do
     result <- evalString str
     case result of
         Left err     -> assertFailure err
-        Right actual -> assertEqual "" expected actual
+        Right x      -> let actual = f x in assertEqual "" expected actual
 
 illTyped :: String -> TestTree
 illTyped str = testCase str $ do
