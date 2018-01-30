@@ -6,6 +6,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE ConstraintKinds #-}
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE EmptyDataDecls #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE DefaultSignatures #-}
@@ -178,7 +179,7 @@ ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppParensValue v) mx
 ppValue (VList xs)
     | Just str <- mapM extractChar xs = string $ show str
     | otherwise     = bracketsList $ map ppValue xs
-ppValue (VRecord m) = bracesList $ map ppEntry $ List.sort $ HashMap.keys m
+ppValue (VRecord m) = bracesList $ map ppEntry $ HashMap.keys m
   where
     ppEntry l = text l <+> "=" <+> "<Thunk>"
 ppValue (VVariant l _) = text l <+> "<Thunk>"
@@ -192,7 +193,7 @@ ppParensValue v =
 
 -- | This evaluates deeply
 ppValue' :: Value -> EvalM Doc
-ppValue' (VRecord m) = (bracesList . map ppEntry . HashMap.toList)
+ppValue' (VRecord m) = (bracesList . map ppEntry . List.sortBy (comparing fst) . HashMap.toList)
                            <$> mapM (force >=> ppValue') m
   where
     ppEntry (l, v) = text l <+> text "=" <+> v
@@ -541,7 +542,7 @@ class HasType a => ToValue a where
 class HasType a => FromValue a where
     fromValue :: MonadEval f => Value -> f a
     default fromValue :: (G.Generic a, ADFor (G.Rep a) ~ Var, GFromValue (G.Rep a), MonadEval f) => Value -> f a
-    fromValue = runParser . fmap G.to . renderADParser $ gfromValue defaultOptions Proxy
+    fromValue = runParser . fmap G.to . renderADParser . fixADNames $ gfromValue defaultOptions Proxy
     {- fromValue = error "fromValue" -}
 
 class GHasType f where
@@ -748,18 +749,53 @@ runParser = runReaderT
 
 -- NOTE applicative etc
 
+intoRecord :: (Applicative f, MonadState RecNames f) => f ()
+intoRecord = put $ RecNames 1
 
-nextName :: (Applicative f, MonadState Int f) => f String
+nextName :: (Applicative f, MonadState RecNames f) => f (Maybe String)
 nextName = do
   st <- get
-  put $ st + 1
-  pure $ "_" <> show st
+  case st of
+    RecNamesInit -> pure Nothing
+    RecNames n -> do
+      put $ RecNames $ n + 1
+      pure $ Just $ "_" <> show n
 
 chooseP :: Alternative f => Parser f a -> Parser f a -> Parser f a
 chooseP = (<|>)
 
 -- FIXME
 traceP x = trace (show x) x
+
+
+data RecNames
+  = RecNamesInit -- We are not in a product
+  | RecNames Int -- We are in a product, and this is the next name to generate
+
+-- | Remove singleton selectors.
+-- Rename anonymous '' selectors with _1, _2 etc.
+fixADNames :: AD Var f a -> AD Var f a
+fixADNames x = evalState (go x) RecNamesInit
+  where
+    go :: AD Var f a -> State RecNames (AD Var f a)
+    go x@Initial{} = pure x
+    go (Coprod f g x y) = Coprod f g <$> go' x <*> go' y
+    go (Constructor k a) = Constructor k <$> go' a
+
+    go' :: AD x f a -> State RecNames (AD x f a)
+    go' x@Singleton{} = pure x
+    go' x@Terminal{} = pure x
+    go' (Prod f x y) = do
+      intoRecord
+      Prod f <$> go' x <*> go' y
+    go' (Selector k a) = do
+      name <- nextName
+      case name of
+        Nothing -> Selector "" <$> go' a
+        Just n  -> Selector n <$> go' a
+    go' x@Initial{} = go x
+    go' x@Coprod{} = go x
+    go' x@Constructor{} = go x
 
 renderADParser :: MonadEval f => AD Var (Parser f) a -> Parser f a
 renderADParser x = evalState (go $ traceP x) 0
@@ -784,14 +820,16 @@ renderADParser x = evalState (go $ traceP x) 0
       pure $ liftA2 f a' b'
     go' (Selector k x) = do
       p <- go' x
-      -- TODO work for sel names...
-      pure $ _Parser $ \x -> case x of
-        (VRecord m) -> case HashMap.lookup k m of
-          Just th -> do
-            v <- force th
-            runParser p v
-          _ -> fail k m
-        _ -> throwError $ "Not a record, wanted '"<> k <>"', got (" <> (showR $ runEvalM' $ ppValue' x) <> ")"
+      case k of
+        "" -> pure p
+        _ ->
+          pure $ _Parser $ \x -> case x of
+            (VRecord m) -> case HashMap.lookup k m of
+              Just th -> do
+                v <- force th
+                runParser p v
+              _ -> fail k m
+            _ -> throwError $ "Not a record, wanted '"<> k <>"', got (" <> (showR $ runEvalM' $ ppValue' x) <> ")"
       where
         fail k m = throwError $ "Bad record, wanted '" <> k <> "', got rec with keys " <> show (HashMap.keys m)
 
@@ -1146,6 +1184,8 @@ instance ToValue a => ToValue [a] where
 
 instance (ToValue a, ToValue b) => ToValue (Either a b)
 instance (FromValue a, FromValue b) => FromValue (Either a b)
+instance (ToValue a, ToValue b) => ToValue (a, b)
+instance (FromValue a, FromValue b) => FromValue (a, b)
 
 instance FromValue () where
     fromValue _ = pure ()
