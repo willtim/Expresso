@@ -917,6 +917,214 @@ instance (GToValue f, GToValue g) => GToValue (f G.:+: g) where
 instance (GToValue f, GToValue g) => GToValue (f G.:*: g) where
   gtoValue opts (lp G.:*: rp) = prod (gtoValue opts lp) (gtoValue opts rp)
 
+
+_Id :: f x -> G.M1 t c f x
+_Id = G.M1
+
+_Const :: c -> G.K1 i c x
+_Const = G.K1
+
+
+instance (GFromValue f, NotVar (ADFor f), G.Constructor c) => GFromValue (G.C1 c f) where
+  type ADFor (G.C1 c f) = Var
+  gfromValue opts p = fmap _Id $ Constructor (G.conName m) $ gfromValue opts (runId <$> p)
+    where m = (undefined :: t c f a)
+instance (GFromValue f, ADFor f ~ None, G.Selector c) => GFromValue (G.S1 c f) where
+  type ADFor (G.S1 c f) = Rec
+  gfromValue opts p = fmap _Id $ Selector (G.selName m) $ gfromValue opts (runId <$> p)
+    where m = (undefined :: t c f a)
+instance GFromValue f => GFromValue (G.D1 c f) where
+  type ADFor (G.D1 c f) = ADFor f
+  gfromValue opts p = fmap _Id $ gfromValue opts (runId <$> p)
+instance FromValue c => GFromValue (G.K1 t c) where
+  type ADFor (G.K1 t c) = None
+  gfromValue opts p = Singleton $ fmap _Const $ _Parser fromValue
+instance GFromValue G.U1 where
+  type ADFor G.U1 = Rec
+  gfromValue opts p = Terminal (pure $ G.U1)
+instance GFromValue G.V1 where
+  type ADFor G.V1 = Var
+  gfromValue opts p = Initial
+instance (GFromValue f, GFromValue g, ADFor f ~ Var, ADFor g ~ Var) => GFromValue (f G.:+: g) where
+  type ADFor (f G.:+: g) = Var
+  gfromValue opts p = Coprod (G.L1) (G.R1) (gfromValue opts lp) (gfromValue opts rp)
+    where
+      lp = leftP p
+      rp = rightP p
+instance (GFromValue f, GFromValue g, ADFor f ~ Rec, ADFor g ~ Rec) => GFromValue (f G.:*: g) where
+  type ADFor (f G.:*: g) = Rec
+  gfromValue opts p = Prod (G.:*:) (gfromValue opts lp) (gfromValue opts rp)
+    where
+      lp = leftP p
+      rp = rightP p
+
+
+
+
+
+
+inside :: proxy (f a) -> Proxy a
+inside = const Proxy
+
+dom :: proxy (a -> b) -> Proxy a
+dom = const Proxy
+
+codom :: proxy (a -> b) -> Proxy b
+codom = inside
+
+
+instance HasType Integer where
+    typeOf _ = _TInt
+
+instance ToValue Integer where
+    toValue = VInt
+
+instance FromValue Integer where
+    fromValue (VInt i) = return i
+    fromValue v        = failfromValue "VInt" v
+
+instance HasType Int where
+    typeOf _ = _TInt
+
+instance ToValue Int where
+    toValue = VInt . fromIntegral
+
+instance FromValue Int where
+    fromValue x = fromInteger <$> fromValue x
+
+instance HasType Double where
+    typeOf _ = _TDbl
+
+instance ToValue Double where
+    toValue = VDbl
+
+instance FromValue Double where
+    fromValue (VDbl d) = return d
+    fromValue v        = failfromValue "VDbl" v
+
+instance HasType Bool where
+  typeOf _ = _TBool
+instance ToValue Bool where
+    toValue = VBool
+
+instance FromValue Bool where
+    fromValue (VBool b) = return b
+    fromValue v         = failfromValue "VBool" v
+instance ToValue Char where
+    toValue = VChar
+instance FromValue Char where
+    fromValue (VChar c) = return c
+    fromValue v         = failfromValue "VChar" v
+instance HasType Char where
+    typeOf _ = _TChar
+
+
+
+
+instance (HasType a, HasType b) => HasType (a -> b) where
+    typeOf p = _TFun (typeOf $ dom p) (typeOf $ inside p)
+
+instance (ToValue a, FromValue b) => FromValue (a -> b) where
+    fromValue (VLam f) = fmap (fmap $ either (error "unexpected") id) $ pure $ \x -> runEvalM' $ do
+      x <- (mkThunk $ pure $ toValue x)
+      r <- f x
+      fromValue r
+    fromValue v           = failfromValue "VLam" v
+
+instance HasType a => HasType [a] where
+    typeOf p = _TList $ typeOf (inside p)
+
+instance ToValue a => ToValue [a] where
+  toValue = VList . fmap toValue
+instance FromValue a => FromValue [a] where
+    fromValue (VList xs) = mapM fromValue xs
+    fromValue v          = failfromValue "VList" v
+
+-- TODO make up my mind re: Maybe...
+instance ToValue a => ToValue (Maybe a) where
+    {- toValue = VMaybe . fmap toValue -}
+instance (HasType a) => HasType (Maybe a)
+instance FromValue a => FromValue (Maybe a) where
+
+
+
+-- We can't derive Void as its recursively defined...
+instance HasType Void where
+  typeOf _ = _TVariant _TRowEmpty
+instance ToValue Void
+instance FromValue Void
+
+instance HasType ()
+instance FromValue () where
+    fromValue _ = pure ()
+instance ToValue () where
+  toValue _ = VRecord mempty
+
+
+
+instance
+--  {-# OVERLAPS #-}
+  FromValue String where
+    {- fromValue (VString s) = return s -}
+    fromValue (VList xs)  = traverse getC xs
+    fromValue v           = failfromValue "VString" v
+      where
+
+getC :: MonadEval f => Value -> f Char
+getC (VChar c) = pure c
+getC v = failfromValue "VString" v
+
+
+
+
+
+
+
+
+
+
+
+
+-- TODO
+
+instance HasType Ordering
+
+instance (HasType a, HasType b) => HasType (Either a b)
+instance (HasType a, HasType b) => HasType (a, b)
+instance (HasType a, HasType b, HasType c) => HasType (a, b, c)
+instance (HasType a, HasType b, HasType c, HasType d) => HasType (a, b, c, d)
+instance (ToValue a, ToValue b) => ToValue (Either a b)
+instance (FromValue a, FromValue b) => FromValue (Either a b)
+instance (ToValue a, ToValue b) => ToValue (a, b)
+instance (FromValue a, FromValue b) => FromValue (a, b)
+-- TODO Vector/Set (as []), map as [Entry]
+
+
+
+
+
+
+
+
+
+fromValueL fromValue (VList xs) = mapM fromValue xs
+fromValueL _         v          = failfromValue "VList" v
+
+
+
+
+fromValueRTh (VRecord m) = return m
+fromValueRTh v           = failfromValue "VRecord" v
+
+failfromValue :: MonadError String f => String -> Value -> f a
+failfromValue desc v = throwError $ "Expected a " ++ desc ++
+    ", but got: " ++ show (ppValue v)
+
+
+
+
+
+
 -- TODO for testing...
 data V1 a = V1 { s :: a } deriving (G.Generic, Show)
 instance (HasType a) => HasType (V1 a)
@@ -957,213 +1165,5 @@ roundTrip = runEvalM' . fromValue . toValue
   where
 showR (Right x) = show x
 showR (Left e) = "<<Error:" <> show e <> ">>"
-
-
-_Id :: f x -> G.M1 t c f x
-_Id = G.M1
-
-_Const :: c -> G.K1 i c x
-_Const = G.K1
-
-{- mapAD :: (forall a . f a -> g a) -> AD x f b -> AD x g b -}
-{- mapAD = undefined -}
-
-instance (GFromValue f, NotVar (ADFor f), G.Constructor c) => GFromValue (G.C1 c f) where
-  type ADFor (G.C1 c f) = Var
-  gfromValue opts p = fmap _Id $ Constructor (G.conName m) $ gfromValue opts (runId <$> p)
-    where m = (undefined :: t c f a)
-instance (GFromValue f, ADFor f ~ None, G.Selector c) => GFromValue (G.S1 c f) where
-  type ADFor (G.S1 c f) = Rec
-  gfromValue opts p = fmap _Id $ Selector (G.selName m) $ gfromValue opts (runId <$> p)
-    where m = (undefined :: t c f a)
-instance GFromValue f => GFromValue (G.D1 c f) where
-  type ADFor (G.D1 c f) = ADFor f
-  gfromValue opts p = fmap _Id $ gfromValue opts (runId <$> p)
-instance FromValue c => GFromValue (G.K1 t c) where
-  type ADFor (G.K1 t c) = None
-  gfromValue opts p = Singleton $ fmap _Const $ _Parser fromValue
-instance GFromValue G.U1 where
-  type ADFor G.U1 = Rec
-  gfromValue opts p = Terminal (pure $ G.U1)
-instance GFromValue G.V1 where
-  type ADFor G.V1 = Var
-  gfromValue opts p = Initial
-instance (GFromValue f, GFromValue g, ADFor f ~ Var, ADFor g ~ Var) => GFromValue (f G.:+: g) where
-  type ADFor (f G.:+: g) = Var
-  gfromValue opts p = Coprod (G.L1) (G.R1) (gfromValue opts lp) (gfromValue opts rp)
-    where
-      lp = leftP p
-      rp = rightP p
-instance (GFromValue f, GFromValue g, ADFor f ~ Rec, ADFor g ~ Rec) => GFromValue (f G.:*: g) where
-  type ADFor (f G.:*: g) = Rec
-  gfromValue opts p = Prod (G.:*:) (gfromValue opts lp) (gfromValue opts rp)
-    where
-      lp = leftP p
-      rp = rightP p
-
-
-{- instance (GFromValue f, G.Constructor c) => GFromValue (G.C1 c f) where -}
-  {- gfromValue opts x = (constructor $ G.conName m) $ fmap (fmap _Id) $ gfromValue opts (runId <$> x) -}
-    {- where m = (undefined :: t c f a) -}
-{- instance (GFromValue f, G.Selector c) => GFromValue (G.S1 c f) where -}
-  {- gfromValue = error "TODO" -}
-{- instance GFromValue f => GFromValue (G.D1 c f) where -}
-  {- gfromValue = error "TODO" -}
-{- instance FromValue c => GFromValue (G.K1 t c) where -}
-  {- gfromValue opts _ = singleton $ fmap _Const $ Parser $ fromValue -}
-{- instance GFromValue G.U1 where -}
-  {- gfromValue opts _ = terminal -}
-{- instance GFromValue G.V1 where -}
-  {- gfromValue opts _ = initial -}
-{- instance (GFromValue f, GFromValue g) => GFromValue (f G.:+: g) where -}
-  {- {- gfromValue opts (G.L1 x) = inL (gfromValue opts x) -} -}
-  {- {- gfromValue opts (G.R1 x) = inR (gtoValue opts x) -} -}
-  {- gfromValue opts p = coprod (fmap (fmap G.L1) $ gfromValue opts lp) (fmap (fmap G.R1) $ gfromValue opts rp) -}
-    {- where -}
-      {- lp = leftP p -}
-      {- rp = rightP p -}
-{- instance (GFromValue f, GFromValue g) => GFromValue (f G.:*: g) where -}
-  {- gfromValue opts p = prodWith (liftA2 (G.:*:)) (gfromValue opts lp) (gfromValue opts rp) -}
-    {- where -}
-      {- lp = leftP p -}
-      {- rp = rightP p -}
-
-
-
-instance HasType Integer where
-    typeOf _ = _TInt
-instance HasType Int where
-    typeOf _ = _TInt
-instance HasType Double where
-    typeOf _ = _TDbl
-instance HasType Char where
-    typeOf _ = _TChar
-instance HasType a => HasType [a] where
-    typeOf p = _TList $ typeOf (inside p)
-instance (HasType a, HasType b) => HasType (a -> b) where
-    typeOf p = _TFun (typeOf $ dom p) (typeOf $ inside p)
-
-instance HasType Void where
-  typeOf _ = _TVariant _TRowEmpty
-instance HasType ()
-instance HasType Bool where
-  typeOf _ = _TBool
-instance HasType Ordering
--- FIXME remove Maybe/Char from lang, add Text
-instance (HasType a) => HasType (Maybe a)
-instance (HasType a, HasType b) => HasType (Either a b)
-instance (HasType a, HasType b) => HasType (a, b)
-instance (HasType a, HasType b, HasType c) => HasType (a, b, c)
-instance (HasType a, HasType b, HasType c, HasType d) => HasType (a, b, c, d)
--- TODO Vector/Set (as []), map as [Entry]
-
-
-
-inside :: proxy (f a) -> Proxy a
-inside = const Proxy
-
-dom :: proxy (a -> b) -> Proxy a
-dom = const Proxy
-
-codom :: proxy (a -> b) -> Proxy b
-codom = inside
-
-
--- FIXME: internally remove special types for Bool/Maybe, then derive these instances (use variants)
-
-
--- TODO derive
-instance ToValue () where
-    toValue _ = VRecord mempty
-instance ToValue Void
-instance FromValue Void
-
--- TODO derive
-instance ToValue Bool where
-    toValue = VBool
-instance ToValue Integer where
-    toValue = VInt
-instance ToValue Int where
-    toValue = VInt . fromIntegral
-instance ToValue Double where
-    toValue = VDbl
-instance ToValue Char where
-    toValue = VChar
-
--- TODO derive
-instance ToValue a => ToValue (Maybe a) where
-    toValue = VMaybe . fmap toValue
-instance ToValue a => ToValue [a] where
-    toValue = VList . fmap toValue
-
-instance (ToValue a, ToValue b) => ToValue (Either a b)
-instance (FromValue a, FromValue b) => FromValue (Either a b)
-instance (ToValue a, ToValue b) => ToValue (a, b)
-instance (FromValue a, FromValue b) => FromValue (a, b)
-
-instance FromValue () where
-    fromValue _ = pure ()
-
-instance FromValue Integer where
-    fromValue (VInt i) = return i
-    fromValue v        = failfromValue "VInt" v
-
-instance FromValue Int where
-    fromValue x = fromInteger <$> fromValue x
-
-instance FromValue Double where
-    fromValue (VDbl d) = return d
-    fromValue v        = failfromValue "VDbl" v
-
--- TODO derive
-{- instance FromValue Bool -}
-instance FromValue Bool where
-    fromValue (VBool b) = return b
-    fromValue v         = failfromValue "VBool" v
-
-instance FromValue Char where
-    fromValue (VChar c) = return c
-    fromValue v         = failfromValue "VChar" v
-
--- TODO derive
-{- instance FromValue a => FromValue (Maybe a) -}
-instance FromValue a => FromValue (Maybe a) where
-    fromValue (VMaybe m) = mapM fromValue m
-    fromValue v          = failfromValue "VMaybe" v
-
-instance
---  {-# OVERLAPS #-}
-  FromValue String where
-    {- fromValue (VString s) = return s -}
-    fromValue (VList xs)  = traverse getC xs
-    fromValue v           = failfromValue "VString" v
-      where
-{- getC :: Value -> EvalM Char -}
-getC (VChar c) = pure c
-getC v = failfromValue "VString" v
-
-instance FromValue a => FromValue [a] where
-    fromValue (VList xs) = mapM fromValue xs
-    fromValue v          = failfromValue "VList" v
-
-fromValueL fromValue (VList xs) = mapM fromValue xs
-fromValueL _         v          = failfromValue "VList" v
-
-instance (ToValue a, FromValue b) => FromValue (a -> b) where
-    fromValue (VLam f) = fmap (fmap $ either (error "unexpected") id) $ pure $ \x -> runEvalM' $ do
-      x <- (mkThunk $ pure $ toValue x)
-      r <- f x
-      fromValue r
-    fromValue v           = failfromValue "VLam" v
-
-
-
-
-fromValueRTh (VRecord m) = return m
-fromValueRTh v           = failfromValue "VRecord" v
-
-failfromValue :: MonadError String f => String -> Value -> f a
-failfromValue desc v = throwError $ "Expected a " ++ desc ++
-    ", but got: " ++ show (ppValue v)
 
 
