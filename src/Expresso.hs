@@ -15,6 +15,7 @@ module Expresso
   , eval
   , evalFile
   , evalString
+  , evalString'
   , evalWithEnv
   , evalWithEnv'
   , showType
@@ -86,6 +87,8 @@ evalWithEnv' (tEnv, tState, env) ei = runExceptT $ do
 eval :: FromValue a => ExpI -> IO (Either String a)
 eval = evalWithEnv (mempty, initTIState, mempty)
 
+eval' = evalWithEnv' (mempty, initTIState, mempty)
+
 evalFile :: FromValue a => FilePath -> IO (Either String a)
 evalFile path = runExceptT $ do
     top <- ExceptT $ Parser.parse path <$> readFile path
@@ -95,6 +98,11 @@ evalString :: FromValue a => String -> IO (Either String a)
 evalString str = runExceptT $ do
     top <- ExceptT $ return $ Parser.parse "<unknown>" str
     ExceptT $ eval top
+
+evalString' :: String -> IO (Either String Value)
+evalString' str = runExceptT $ do
+    top <- ExceptT $ return $ Parser.parse "<unknown>" str
+    ExceptT $ eval' top
 
 -- used by the REPL to bind variables
 bind

@@ -1,6 +1,13 @@
 
+{-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DeriveGeneric #-}
 {-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE DataKinds #-}
+{-# LANGUAGE KindSignatures #-}
+{-# LANGUAGE GADTs #-}
+{-# LANGUAGE EmptyDataDecls #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 module Main where
 
 import Test.Tasty (TestTree, defaultMain, testGroup)
@@ -9,9 +16,13 @@ import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 
 import GHC.Generics
+import GHC.TypeLits
 import Data.Proxy
 import Data.Void
 import Data.Map (Map)
+import Control.Monad.Error
+
+import Data.Vinyl
 
 import Expresso hiding (typeOf) -- TODO resolve conflict
 -- TODO reexport
@@ -200,6 +211,62 @@ rankNTests = testGroup
          {- "let f = \\(m ::: forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = m.reverse \"abc\" } in f (import \"Prelude.x\") == {l = [False, True], r = \"cba\"}" True -}
   ]
 
+
+
+instance (f ~ ElField) => HasType (Rec f '[]) where
+  typeOf _ = _TRecord $ _TRowEmpty
+instance (f ~ ElField) => HasType (Rec f ('(k, v) : rs)) where
+  typeOf p = _TRecord $ _TRowEmpty
+
+instance (f ~ ElField) => FromValue (Rec f '[]) where
+  fromValue _ = pure RNil
+
+instance (f ~ ElField, KnownSymbol k, FromValue v, FromValue (Rec f rs)) => FromValue (Rec f ('(k, v) : rs)) where
+  fromValue v = do
+    case v of
+      VRecord r -> case HashMap.lookup k r of
+        Just x -> do
+          v <- fromValue =<< force x
+          r <- fromValue (VRecord r)
+          pure $ rCons kp v r
+        Nothing -> throwError $ "bad record, no '" ++ k ++ "'"
+      v -> throwError $ "not a record: " ++ show v
+    where
+      k = symbolVal kp
+      kp = (undefined :: F k)
+
+
+r1 :: FieldRec '[ '("foo", Bool) ]
+r1 = (SField :: SField '("foo",Bool)) =: True
+
+r2 :: Rec ElField '[ '("foo", Bool), '("bar", Bool)]
+r2 = rec (f::F"foo") True <+> rec (f::F"bar") False
+
+
+a & b = fi a <+> b
+infixr 1 &
+infixr 7 ==>
+
+rCons :: KnownSymbol t => proxy t -> a -> FieldRec rs -> FieldRec ('(t, a) : rs)
+rCons _ v rs = Field v :& rs
+
+rec :: KnownSymbol t => proxy t -> a -> FieldRec '[ '(t, a) ]
+rec _ = (SField =:)
+
+fi :: FI s a -> FieldRec '[ '(s, a) ]
+fi (FI x) = SField =: x
+
+data FI :: Symbol -> * -> * where
+  FI :: KnownSymbol s => a -> FI s a
+
+
+(==>) :: KnownSymbol s => F s -> a -> FI s a
+_ ==> b = FI b
+
+
+data F :: Symbol -> * where
+f :: F s
+f = undefined
 
 -- Marshalling
 data Rat = Rat { nom :: Integer, denom :: Integer } | Simple Integer deriving (Generic)

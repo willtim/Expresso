@@ -475,6 +475,17 @@ class HasType a where
     typeOf = either id (renderADT . improveADT) . gtypeOf defaultOptions . fmap G.from
 
 -- | Haskell types whose values can be converted to Expresso values.
+--
+-- We expect
+--
+-- @
+-- typeOf (pure a) = typeOfValue (toValue a)
+-- @
+--
+-- If a type is an instance of both 'FromValue' and 'ToValue', we expect:
+-- @
+-- fromValue . toValue = pure
+-- @
 class HasType a => ToValue a where
     toValue :: ToValue a => a -> Value
     default toValue :: (G.Generic a, GToValue (G.Rep a)) => a -> Value

@@ -54,4 +54,4 @@ Test-Suite test-expresso
   Hs-Source-Dirs:  src
   Build-Depends:   base, containers, hashable, mtl, parsec, ansi-wl-pprint,
                    unordered-containers, haskeline, directory, filepath,
-                   expresso, tasty, tasty-hunit
+                   expresso, tasty, tasty-hunit, vinyl
