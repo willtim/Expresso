@@ -42,20 +42,20 @@ letTests = testGroup
   , hasValue "let x = 1 in let y = 2 in x + y" (3::Integer)
   , hasValue "let x = 1; y = 2 in x + y" (3::Integer)
 
-  , hasValue "let {..} = {inc = \\x -> x + 1} in inc 1" (2::Integer)
-  , hasValue "let m = {inc = \\x -> x + 1} in m.inc 1" (2::Integer)
+  {- , hasValue "let {..} = {inc = \\x -> x + 1} in inc 1" (2::Integer) -}
+  {- , hasValue "let m = {inc = \\x -> x + 1} in m.inc 1" (2::Integer) -}
 
-  , hasValue "let m = {id = \\x -> x} in {foo = [m.id 1], bar = m.id [1]}"
-        $ toMap ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+  {- , hasValue "let m = {id = \\x -> x} in {foo = [m.id 1], bar = m.id [1]}" -}
+        {- $ toMap ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])] -}
 
-  -- Record argument field-pun generalisation
-  , hasValue "let {id} = {id = \\x -> x} in {foo = [id 1], bar = id [1]}"
-        $ toMap ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
-  , hasValue "let {..} = {id = \\x -> x} in {foo = [id 1], bar = id [1]}"
-        $ toMap ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])]
+  {- -- Record argument field-pun generalisation -}
+  {- , hasValue "let {id} = {id = \\x -> x} in {foo = [id 1], bar = id [1]}" -}
+        {- $ toMap ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])] -}
+  {- , hasValue "let {..} = {id = \\x -> x} in {foo = [id 1], bar = id [1]}" -}
+        {- $ toMap ["foo" --> ([1]::[Integer]), "bar" --> ([1]::[Integer])] -}
 
-    -- Num constraint violation
-  , illTyped "let square = \\x -> x * x in {foo = square 1, bar = square [1]}"
+    {- -- Num constraint violation -}
+  {- , illTyped "let square = \\x -> x * x in {foo = square 1, bar = square [1]}" -}
 
   , hasValue "let {..} = {inc = x -> x + 1} in inc 1" (2::Integer)
   , hasValue "let m = {inc = x -> x + 1} in m.inc 1" (2::Integer)
@@ -75,12 +75,14 @@ letTests = testGroup
 
 lambdaTests = testGroup
   "Lambda expressions"
-  [ hasValue "(\\x -> \\y -> x + y) 1 2" (3::Integer)
-  , hasValue "(\\x y -> x + y) 1 2" (3::Integer)
-  , illTyped "\\x -> x x"
-  , illTyped "let absorb = fix (\\r x -> r) in absorb"
-  , illTyped "let create = fix (\\r x -> r x x) in create"
-  , hasValue "(x -> y -> x + y) 1 2" (3::Integer)
+  [
+    {- hasValue "(\\x -> \\y -> x + y) 1 2" (3::Integer) -}
+  {- , hasValue "(\\x y -> x + y) 1 2" (3::Integer) -}
+  {- , illTyped "\\x -> x x" -}
+  {- , illTyped "let absorb = fix (\\r x -> r) in absorb" -}
+  {- , illTyped "let create = fix (\\r x -> r x x) in create" -}
+  {- ,  -}
+    hasValue "(x -> y -> x + y) 1 2" (3::Integer)
   , hasValue "(x y -> x + y) 1 2" (3::Integer)
   , illTyped "x -> x x"
   , illTyped "let absorb = fix (r x -> r) in absorb"
@@ -240,20 +242,27 @@ foreignTypeTests = testGroup
 
   , hasType (xx :: Proxy ((Int -> Void) -> Double)) "(Int -> <>) -> Double"
   ]
+
 foreignImportTests = testGroup
-  "Foreign import"
-  [ isValue (1 :: Int) "1"
-  , isValue (1 :: Integer) "1"
-  , isValue True "True"
-  , isValue (2.5 :: Double) "2.5"
-  , isValue "hello" "\"hello\""
-  , isValue () "{}"
-  , isValue (Just (2 :: Int)) "Just 2"
+  "Foreign import (Haskell to Expresso)"
+  [ isValue "1" (1 :: Int)
+  , isValue "1" (1 :: Integer)
+  , isValue "True" True
+  , isValue "2.5" (2.5 :: Double)
+  , isValue "\"hello\"" "hello"
+  , isValue "{}" ()
+  , isValue "Just 2" (Just (2 :: Int))
   ]
+
 foreignExportTests = testGroup
-  "Foreign export"
-  [
-  -- hasValue
+  "Foreign export (Expresso to Haskell)"
+  [ hasValue "1" (1 :: Int)
+  , hasValue "1" (1 :: Integer)
+  , hasValue "True" True
+  , hasValue "2.5" (2.5 :: Double)
+  , hasValue "\"hello\"" "hello"
+  , hasValue "{}" ()
+  , hasValue "Just 2" (Just (2 :: Int))
   ]
 
 xx :: Proxy a
@@ -274,13 +283,15 @@ doesNotHaveType hsTy expected = testCase caseStr $
     actual = show $ ppType $ typeOf hsTy
     caseStr = show hsTy ++ " " ++ show expected
 
-isValue :: ToValue a => a -> String -> TestTree
-isValue hsVal expected = testCase caseStr $
+-- | Test that a given HS value can be imported to Expresso.
+isValue :: ToValue a => String -> a -> TestTree
+isValue expected hsVal = testCase caseStr $
   assertEqual "" expected actual
   where
     actual = show $ ppValue $ toValue hsVal
-    caseStr = expected ++ " == " ++ actual
+    caseStr = expected
 
+-- | Test that a given Expresso expression can be evaluated and exported to Haskell.
 hasValue :: (Eq a, Show a, FromValue a) => String -> a -> TestTree
 hasValue str expected = testCase str $ do
     result <- evalString str
