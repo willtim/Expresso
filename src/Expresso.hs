@@ -31,7 +31,7 @@ import Control.Monad.Except (ExceptT(..), runExceptT, throwError)
 import Data.Monoid
 import Control.Applicative
 
-import Expresso.Eval (Env, EvalM, FromValue(..), Value(..), runEvalM)
+import Expresso.Eval (Env, EvalM, FromValue(..), Value(..))
 import Expresso.TypeCheck (TIState, initTIState)
 import Expresso.Pretty (render)
 import Expresso.Syntax
@@ -40,6 +40,10 @@ import Expresso.Utils
 import qualified Expresso.Eval as Eval
 import qualified Expresso.TypeCheck as TypeCheck
 import qualified Expresso.Parser as Parser
+
+
+runEvalM :: EvalM a -> IO (Either String a)
+runEvalM = pure . Eval.runEvalM'
 
 
 typeOfWithEnv :: TypeEnv -> TIState -> ExpI -> IO (Either String Type)
@@ -102,15 +106,21 @@ bind
     -> ExpI
     -> IO (TypeEnv, TIState, Env)
 bind (tEnv, tState, env) b ei = do
-    e     <- undefined $ Parser.resolveImports ei
-    let (res'e, tState') =
-            TypeCheck.runTI (TypeCheck.tcDecl (getAnn ei) b e) tEnv tState
-    case res'e of
-        Left err    -> error "bad"-- undefined $ throwError err
-        Right tEnv' -> do
-            thunk <- undefined $ Eval.mkThunk $ Eval.eval env e
-            env'  <- undefined $ Eval.bind env b thunk
-            return (tEnv', tState', env')
+    r  <- runExceptT $ Parser.resolveImports ei
+    case r of
+      Left x -> error x
+      Right e -> do
+        let (res'e, tState') =
+                TypeCheck.runTI (TypeCheck.tcDecl (getAnn ei) b e) tEnv tState
+        case res'e of
+            Left err    -> error err
+            Right tEnv' -> do
+                thunk <- runEvalIO $ Eval.mkThunk $ Eval.eval env e
+                env'  <- runEvalIO $ Eval.bind env b thunk
+                return (tEnv', tState', env')
+  where
+    runEvalIO :: EvalM a -> IO a
+    runEvalIO = either error pure . Eval.runEvalM'
 
 inferTypes :: TypeEnv -> TIState -> Exp -> Either String Type
 inferTypes tEnv tState e =

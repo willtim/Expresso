@@ -39,7 +39,7 @@
 --
 module Expresso.Eval(
     eval
-  , runEvalM
+  , runEvalM'
   , Env
   , EvalM
   , Value(..)
@@ -193,8 +193,6 @@ extractChar :: Value -> Maybe Char
 extractChar (VChar c) = Just c
 extractChar _ = Nothing
 
-runEvalM :: EvalM a -> IO (Either String a)
-runEvalM = pure . runEvalM'
 
 runEvalM' :: EvalM a -> Either String a
 runEvalM' = runIdentity . runExceptT . runEvalT
