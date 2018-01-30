@@ -41,11 +41,7 @@ parse src = showError . P.parse (whiteSpace *> pExp <* P.eof) src
 pExp     = addTypeAnnot
        <$> getPosition
        <*> pExp'
-{- <<<<<<< HEAD -}
-       {- <*> optional (reservedOp ":::" *> pType) -}
-{- ======= -}
        <*> optional (reservedOp ":" *> pTypeAnn)
-{- >>>>>>> tim/master -}
 
 addTypeAnnot pos e (Just t) = withPos pos (EAnn e t)
 addTypeAnnot _   e Nothing  = e
@@ -74,29 +70,12 @@ pLetDecl = (,) <$> pLetBind
 
 pLam     = mkLam
        <$> getPosition
-{- <<<<<<< HEAD -}
-       {- <*> try (optional (reservedOp "\\") *> many1 pBind <* reservedOp "->" <* whiteSpace) -}
-{- ======= -}
        <*> try (many1 pBind <* reservedOp "->" <* whiteSpace)
-{- >>>>>>> tim/master -}
        <*> pExp'
        <?> "lambda expression"
 
 pAnnLam  = mkAnnLam
        <$> getPosition
-{- <<<<<<< HEAD -}
-       {- <*> try (reservedOp "\\" *> many1 pAnnBind <* reservedOp "->" <* whiteSpace) -}
-       {- <*> pExp' -}
-       {- <?> "lambda expression with type annotated argument" -}
-
-{- pAnnBind = parens $ (,) <$> pBind <*> (reservedOp ":::" *> pType) -}
-
-{- pAtom    = pPrim <|> try pVar <|> parens (pSection <|> pExp) -}
-
-{- pSection = empty -- pSigSection -}
-
-{- {- pSigSection = mkSigSection <$> getPosition <*> (reservedOp ":" *> pType) -} -}
-{- ======= -}
        <*> try (many1 pAnnBind <* reservedOp "->" <* whiteSpace)
        <*> pExp'
        <?> "lambda expression with type annotated argument"
@@ -393,13 +372,10 @@ withPos pos = withAnn pos . InL
 ------------------------------------------------------------
 -- Parsers for type annotations
 
-{- <<<<<<< HEAD -}
-{- ======= -}
 pTypeAnn = pType'e >>= either (fail . render) return
   where
     pType'e = unboundTyVarCheck <$> getPosition <*> pType
 
-{- >>>>>>> tim/master -}
 pType = pTForAll
     <|> pTFun
     <|> pType'
@@ -415,13 +391,9 @@ pType' = pTVar
      <|> pTMaybe
      <|> parens pType
 
-{- <<<<<<< HEAD -}
-{- pTForAll = mkTForAll -}
-{- ======= -}
 pTForAll = pTForAll'e >>= either (fail . render) return
   where
     pTForAll'e = mkTForAll
-{- >>>>>>> tim/master -}
         <$> getPosition
         <*> (reserved "forall" *> many1 pTyVar <* dot)
         <*> option [] (try pConstraints)
@@ -447,11 +419,6 @@ pRowConstraint = (,)
              <$> (lowerIdentifier <* reservedOp "\\")
              <*> (lacks . (:[]) <$> identifier)
 
-{- <<<<<<< HEAD -}
-{- mkTForAll :: Pos -> [TyVar] -> [(Name, Constraint)] -> Type -> Type -}
-{- mkTForAll pos tvs (M.fromListWith unionConstraints -> m) t = -}
-    {- withAnn pos (TForAllF tvs' t') -}
-{- ======= -}
 -- simple syntactic check for unbound type variables in type annotations
 unboundTyVarCheck :: Pos -> Type -> Either Doc Type
 unboundTyVarCheck pos t
@@ -472,18 +439,14 @@ mkTForAll pos tvs (M.fromListWith unionConstraints -> m) t
           , "constraint(s) reference unknown type variable(s):" <+> parensList (map (dquotes . text) badNames)
           ]
     | otherwise = return $ withAnn pos (TForAllF tvs' t')
-{- >>>>>>> tim/master -}
   where
     t' = substTyVar tvs (map (withAnn pos . TVarF) tvs') t
     tvs' = [ maybe tv (setConstraint tv) $ M.lookup (tyvarName tv) m
            | tv <- tvs
            ]
     setConstraint tv c = tv { tyvarConstraint = c }
-{- <<<<<<< HEAD -}
-{- ======= -}
     bndrs     = S.fromList $ map tyvarName tvs
     badNames  = S.toList $ M.keysSet m  S.\\ bndrs
-{- >>>>>>> tim/master -}
 
 pTVar = (\pos -> withAnn pos . TVarF)
     <$> getPosition
@@ -509,20 +472,12 @@ mkTyVar flavour name = TyVar flavour name (head name) CNone
 
 pTRecord = mkFromRowType TRecordF
        <$> getPosition
-{- <<<<<<< HEAD -}
-       {- <*> (braces $ optionMaybe (try pTVar <|> pTRowBody pTRecordEntry)) -}
-{- ======= -}
        <*> (try (Just <$> braces pTVar) <|> (braces $ optionMaybe (pTRowBody pTRecordEntry)))
-{- >>>>>>> tim/master -}
        <?> "record type annotation"
 
 pTVariant = mkFromRowType TVariantF
        <$> getPosition
-{- <<<<<<< HEAD -}
-       {- <*> (angles $ optionMaybe (try pTVar <|> pTRowBody pTVariantEntry)) -}
-{- ======= -}
        <*> (try (Just <$> angles pTVar) <|> (angles $ optionMaybe (pTRowBody pTVariantEntry)))
-{- >>>>>>> tim/master -}
        <?> "variant type annotation"
 
 pTRowBody pEntry = mkTRowExtend
@@ -565,11 +520,7 @@ languageDef = emptyDef
     , P.opStart        = P.opLetter languageDef
     , P.opLetter       = oneOf ":!#$%&*+./<=>?@\\^|-~"
     , P.reservedOpNames= [ "->", "=", "-", "*", "/", "+"
-{- <<<<<<< HEAD -}
-                         {- , "++", ":::", "::", "|", ",", ".", "\\" -}
-{- ======= -}
                          , "++", "::", "|", ",", ".", "\\"
-{- >>>>>>> tim/master -}
                          , "{|", "|}", ":=", "{..}"
                          , "==", "/=", ">", ">=", "<", "<="
                          , "&&", "||", ":", "=>"
