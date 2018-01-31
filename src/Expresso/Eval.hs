@@ -26,10 +26,10 @@
 {-# LANGUAGE PolyKinds #-}
 {-# LANGUAGE KindSignatures #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
--- For the anti-recursion stuff
-{-# LANGUAGE FunctionalDependencies #-}
-{-# LANGUAGE UndecidableInstances #-}
+
+#if __GLASGOW_HASKELL__ <= 708
 {-# LANGUAGE OverlappingInstances #-}
+#endif
 
 ------------------------------------------------------------
 --
@@ -1063,7 +1063,9 @@ instance ToValue () where
 
 
 instance
---  {-# OVERLAPS #-}
+#if __GLASGOW_HASKELL__ > 708
+  {-# OVERLAPS #-}
+#endif
   FromValue String where
     {- fromValue (VString s) = return s -}
     fromValue (VList xs)  = traverse getC xs
@@ -1106,7 +1108,7 @@ instance (FromValue a, FromValue b) => FromValue (a, b)
 
 
 
-
+fromValueL :: MonadError String m => (Value -> m b) -> Value -> m [b]
 fromValueL fromValue (VList xs) = mapM fromValue xs
 fromValueL _         v          = failfromValue "VList" v
 

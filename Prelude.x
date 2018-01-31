@@ -13,13 +13,14 @@ let
     map         = f -> foldr (x xs -> f x :: xs) [];
     filter      = f -> foldr (x xs -> if f x then (x::xs) else xs);
     length      = foldr (const (n -> 1 + n)) 0;
-    foldl       = f z xs -> foldr (x xsf r -> xsf (f r x)) id xs z;
+    foldl       = f z xs -> foldr (x xsf r -> xsf (f r x)) id xs z : forall b a. (b -> a -> b) -> b -> [a] -> b;
     reverse     = foldl (xs x -> x :: xs) [];
     concat      = xss -> foldr (xs ys -> xs ++ ys) [] xss;
     intersperse = sep xs ->
         let f   = x xs -> (if null xs then [x] else x :: sep :: xs)
         in foldr f [] xs;
     intercalate = xs xss -> concat (intersperse xs xss);
+    lookup = m xs -> case foldl (state elem -> case state of {LookingAt n -> if (n == m) then Found elem else (LookingAt (n + 1)), Found x -> Found x}) (LookingAt 0) xs of { Found x -> Found x, LookingAt n -> NotFound{} } : (forall a. Int -> [a] -> <Found : a, NotFound : {}>);
 
     ------------------------------------------------------------
     -- Maybe operations
@@ -78,4 +79,5 @@ in { id
    , notElem
    , mkOverridable
    , override
+   , lookup
    }

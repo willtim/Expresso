@@ -27,6 +27,9 @@ Library
                    -fno-warn-unused-do-bind
                    -fno-warn-name-shadowing
                    -fno-warn-missing-pattern-synonym-signatures
+                   -fno-warn-unticked-promoted-constructors
+                   -fno-warn-unused-matches
+                   -fno-warn-type-defaults
 
 Executable expresso
   Main-Is:         Repl.hs
@@ -42,16 +45,27 @@ Executable expresso
                    Expresso.Utils
                    Expresso
 
-  ghc-options: -O2 -threaded -rtsopts -Wall -fwarn-tabs -funbox-strict-fields
-               -fno-warn-orphans
-               -fno-warn-unused-do-bind
-               -fno-warn-name-shadowing
-              --  -fno-warn-missing-pattern-synonym-signatures
+  ghc-options:     -O2 -Wall -fwarn-tabs -funbox-strict-fields
+                   -fno-warn-orphans
+                   -fno-warn-unused-do-bind
+                   -fno-warn-name-shadowing
+                   -fno-warn-missing-pattern-synonym-signatures
+                   -fno-warn-unticked-promoted-constructors
+                   -fno-warn-unused-matches
+                   -fno-warn-type-defaults
 
 Test-Suite test-expresso
   Type:            exitcode-stdio-1.0
   Main-Is:         Tests.hs
   Hs-Source-Dirs:  src
+  Other-Modules:   Expresso
+                   Expresso.Eval
+                   Expresso.Parser
+                   Expresso.Pretty
+                   Expresso.Syntax
+                   Expresso.Type
+                   Expresso.TypeCheck
+                   Expresso.Utils
   Build-Depends:   base, containers, hashable, mtl, parsec, ansi-wl-pprint,
                    unordered-containers, haskeline, directory, filepath,
                    expresso, tasty, tasty-hunit, vinyl
