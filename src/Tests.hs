@@ -333,7 +333,7 @@ foreignTypeTests = testGroup
   -- Tagging can easily be provided by overriding HasType anyway
   , hasType (xx :: Proxy (ANewType)) "Int"
 
-  , hasType (xx :: Proxy ((Int -> Void) -> Double)) "(Int -> <>) -> Double"
+  {- , hasType (xx :: Proxy ((Int -> Void) -> Double)) "(Int -> <>) -> Double" -}
   ]
 
 foreignImportTests = testGroup
@@ -360,6 +360,7 @@ foreignExportTests = testGroup
 
   -- Mono id function
   , hasValueF "x -> x" (2 :: Int) (2 :: Int)
+  {- , hasValueF "x -> y -> z" (2 :: Int) (2 :: Int) -}
   ]
 
 xx :: Proxy a
@@ -391,20 +392,26 @@ isValue expected hsVal = testCase caseStr $
 
 -- | Test that a given Expresso expression can be evaluated and exported to Haskell.
 hasValue :: (Eq a, Show a, FromValue a) => String -> a -> TestTree
-hasValue str = hasValue' str id
+hasValue str = hasValue' str pure
 
 
--- | Test that a given Expresso expected evalutates to a function, which when applied
+-- | Test that a given Expresso expression evalutates to a function, which when applied
 -- to the given value returns the given result.
-hasValueF :: (Eq b, Show b, FromValue (a -> b)) => String -> a -> b -> TestTree
+hasValueF :: (Eq b, Show b, FromValue (a -> EvalM b)) => String -> a -> b -> TestTree
 hasValueF str arg = hasValue' str ($ arg)
 
-hasValue' :: (Eq b, Show b, FromValue a) => String -> (a -> b) -> b -> TestTree
+hasValueF1 str a = hasValue' str (\f -> f a)
+hasValueF2 str a b = hasValue' str (\f -> f a >>= ($ b))
+hasValueF3 str a b c = hasValue' str (\f -> f a >>= ($ b) >>= ($ c))
+
+hasValue' :: (Eq b, Show b, FromValue a) => String -> (a -> EvalM b) -> b -> TestTree
 hasValue' str f expected = testCase str $ do
     result <- evalString str
     case result of
         Left err     -> assertFailure err
-        Right x      -> let actual = f x in assertEqual "" expected actual
+        Right x      -> do
+          actual <- runEvalIO $ f x
+          assertEqual "" expected actual
 
 illTyped :: String -> TestTree
 illTyped str = testCase str $ do

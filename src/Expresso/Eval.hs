@@ -40,6 +40,7 @@
 module Expresso.Eval(
     eval
   , runEvalM'
+  , runEvalIO
   , Env
   , EvalM
   , Value(..)
@@ -87,7 +88,7 @@ import Data.Functor.Identity
 import Data.Proxy
 import qualified GHC.Generics as G
 import GHC.TypeLits
-
+import Control.Exception (IOException, catch)
 
 import Expresso.Syntax
 import Expresso.Type
@@ -126,6 +127,22 @@ instance Alternative EvalM where
   empty = EvalM empty
 instance MonadEval EvalM where
   force = force_
+
+
+{- data EvalIO a = EvalIO { runEvalIO :: IO a } -}
+  {- deriving (Functor, Applicative, Monad) -}
+{- instance MonadError EvalIO where -}
+  {- throwError = error -}
+  {- catchError = error "TODO" -}
+
+{- -- Note: Throwaway IO instance with bad 'catch' behavior -}
+{- -- Do not use for serious code... -}
+{- instance MonadEval EvalIO where -}
+  {- force = runEvalIO . force -}
+    {- where -}
+runEvalIO :: EvalM a -> IO a
+runEvalIO = either error pure . runEvalM'
+
 
 instance Show Thunk where
     show _ = "<Thunk>"
@@ -1021,11 +1038,12 @@ instance HasType Char where
 
 
 
-instance (HasType a, HasType b) => HasType (a -> b) where
-    typeOf p = _TFun (typeOf $ dom p) (typeOf $ inside p)
+instance (HasType a, HasType b) => HasType (a -> f b) where
+    typeOf p = _TFun (typeOf $ dom p) (typeOf $ inside $ inside p)
 
-instance (ToValue a, FromValue b) => FromValue (a -> b) where
-    fromValue (VLam f) = fmap (fmap $ either (error "unexpected") id) $ pure $ \x -> runEvalM' $ do
+instance (ToValue a, FromValue b, MonadEval f) => FromValue (a -> f b) where
+    -- Return in the outer evaluation monad
+    fromValue (VLam f) = pure  $ \x -> either throwError pure $ runEvalM' $ do
       x <- (mkThunk $ pure $ toValue x)
       r <- f x
       fromValue r
