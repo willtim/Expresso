@@ -199,7 +199,6 @@ relationalTests = testGroup
   , hasValue "[1,2,3] == [1,2,3]" True -- lists can be compared for equality
   , hasValue "[1,2,3] >= [1,2,2]" True -- lists can be compared for ordering
   , hasValue "Just 1 == Just 1" True -- maybe can be compared for equality
-  , hasValue "Just 2 >= Just 1" True -- maybe can be compared for ordering
   , hasValue "True&&True"   True
   , hasValue "True||False"  True
   ]
@@ -214,7 +213,7 @@ constraintTests = testGroup
 
 lazyTests = testGroup
   "Lazy evaluation tests using error primitive"
-  [ hasValue "maybe (error \"bang!\") (x -> x == 42) (Just 42)" True
+  [ hasValue "(import \"Prelude.x\").maybe (error \"bang!\") (x -> x == 42) (Just 42)" True
   , hasValue "{ x = error \"boom!\", y = 42 }.y" (42::Integer)
   , hasValue "case Bar (error \"fizzle!\") of { Foo{} -> 0 | otherwise -> 42 }" (42::Integer)
   ]
@@ -312,7 +311,7 @@ foreignTypeTests = testGroup
   , hasType (xx :: Proxy Integer) "Int"
   , hasType (xx :: Proxy Double) "Double"
   , hasType (xx :: Proxy [(Int,Bool)])
-      "[{_1 : Int, _2 : <False : {}, True : {}>}]"
+      "[{_1 : Int, _2 : Bool}]"
     -- or?:
     -- "[(Int,Bool)]"
   -- TODO support Char?
@@ -386,7 +385,7 @@ isValue :: ToValue a => String -> a -> TestTree
 isValue expected hsVal = testCase caseStr $
   assertEqual "" expected actual
   where
-    actual = show $ ppValue $ toValue hsVal
+    actual = show $ toValue hsVal
     caseStr = expected
 
 

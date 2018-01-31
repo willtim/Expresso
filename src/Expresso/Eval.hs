@@ -156,7 +156,7 @@ data Value
   | VDbl     !Double
   | VBool    !Bool
   | VChar    !Char
-  | VMaybe   !(Maybe Value)
+  {- | VMaybe   !(Maybe Value) -}
   | VList    ![Value] -- lists are strict
   | VRecord  !(HashMap Label Thunk) -- field order no defined
   | VVariant !Label !Thunk
@@ -174,7 +174,7 @@ ppValue (VInt  i)   = integer i
 ppValue (VDbl  d)   = double d
 ppValue (VBool b)   = if b then "True" else "False"
 ppValue (VChar c)   = text $ c : []
-ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppParensValue v) mx
+{- ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppParensValue v) mx -}
 ppValue (VList xs)
     | Just str <- mapM extractChar xs = string $ show str
     | otherwise     = bracketsList $ map ppValue xs
@@ -186,7 +186,7 @@ ppValue (VVariant l _) = text l <+> "<Thunk>"
 ppParensValue :: Value -> Doc
 ppParensValue v =
     case v of
-        VMaybe{}   -> parens $ ppValue v
+        {- VMaybe{}   -> parens $ ppValue v -}
         VVariant{} -> parens $ ppValue v
         _          -> ppValue v
 
@@ -202,7 +202,7 @@ ppValue' v = return $ ppValue v
 ppParensValue' :: Value -> EvalM Doc
 ppParensValue' v =
     case v of
-        VMaybe{}   -> parens <$> ppValue' v
+        {- VMaybe{}   -> parens <$> ppValue' v -}
         VVariant{} -> parens <$> ppValue' v
         _          -> ppValue' v
 
@@ -329,13 +329,13 @@ evalPrim pos p = case p of
         return $ VLam $ \x ->
             mkThunk (evalApp pos g x) >>= evalApp pos f
 
-    JustPrim      -> mkStrictLam $ \v -> return $ VMaybe (Just v)
-    NothingPrim   -> VMaybe Nothing
-    MaybePrim     -> VLam $ \x -> return $ mkStrictLam2 $ \f v ->
-        case v of
-            VMaybe (Just v') -> evalApp pos f (Thunk $ return v')
-            VMaybe Nothing   -> force x
-            _                -> failOnValues pos [v]
+    {- JustPrim      -> mkStrictLam $ \v -> return $ VMaybe (Just v) -}
+    {- NothingPrim   -> VMaybe Nothing -}
+    {- MaybePrim     -> VLam $ \x -> return $ mkStrictLam2 $ \f v -> -}
+        {- case v of -}
+            {- VMaybe (Just v') -> evalApp pos f (Thunk $ return v') -}
+            {- VMaybe Nothing   -> force x -}
+            {- _                -> failOnValues pos [v] -}
 
     ListEmpty     -> VList []
     ListNull      -> VLam $ \xs ->
@@ -424,11 +424,11 @@ equalValues _ (VChar c1)   (VChar c2)   = return $ c1 == c2
 equalValues p (VList xs)   (VList ys)
     | length xs == length ys = and <$> zipWithM (equalValues p) xs ys
     | otherwise = return False
-equalValues p (VMaybe m1)  (VMaybe m2)  =
-    case (m1, m2) of
-      (Just v1, Just v2) -> equalValues p v1 v2
-      (Nothing, Nothing) -> return True
-      _                  -> return False
+{- equalValues p (VMaybe m1)  (VMaybe m2)  = -}
+    {- case (m1, m2) of -}
+      {- (Just v1, Just v2) -> equalValues p v1 v2 -}
+      {- (Nothing, Nothing) -> return True -}
+      {- _                  -> return False -}
 equalValues p (VRecord m1) (VRecord m2) = do
     (ls1, vs1) <- unzip . recordValues <$> mapM force m1
     (ls2, vs2) <- unzip . recordValues <$> mapM force m2
@@ -457,12 +457,12 @@ compareValues p (VList xs)   (VList ys)   = go xs ys
           if c == EQ
               then go xs' ys'
               else return c
-compareValues p (VMaybe m1)  (VMaybe m2)  =
-    case (m1, m2) of
-      (Just v1, Just v2) -> compareValues p v1 v2
-      (Nothing, Nothing) -> return EQ
-      (Nothing, Just{} ) -> return LT
-      (Just{} , Nothing) -> return GT
+{- compareValues p (VMaybe m1)  (VMaybe m2)  = -}
+    {- case (m1, m2) of -}
+      {- (Just v1, Just v2) -> compareValues p v1 v2 -}
+      {- (Nothing, Nothing) -> return EQ -}
+      {- (Nothing, Just{} ) -> return LT -}
+      {- (Just{} , Nothing) -> return GT -}
 compareValues p v1 v2 = failOnValues p [v1, v2]
 
 -- | Used for equality of records, sorts values by key
@@ -1023,10 +1023,10 @@ instance HasType Bool where
   typeOf _ = _TBool
 instance ToValue Bool where
     toValue = VBool
-
 instance FromValue Bool where
     fromValue (VBool b) = return b
     fromValue v         = failfromValue "VBool" v
+
 instance ToValue Char where
     toValue = VChar
 instance FromValue Char where
@@ -1066,6 +1066,8 @@ fv3 :: (MonadEval m, FromValue r, ToValue a, ToValue b) =>
 fv3 = (\f a b c -> (f a >>= ($ b) >>= ($ c))) fromValue
 
 
+
+
 instance HasType a => HasType [a] where
     typeOf p = _TList $ typeOf (inside p)
 
@@ -1077,7 +1079,6 @@ instance FromValue a => FromValue [a] where
 
 -- TODO make up my mind re: Maybe...
 instance ToValue a => ToValue (Maybe a) where
-    {- toValue = VMaybe . fmap toValue -}
 instance (HasType a) => HasType (Maybe a)
 instance FromValue a => FromValue (Maybe a) where
 

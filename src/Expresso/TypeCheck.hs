@@ -179,7 +179,7 @@ mgu TInt TInt = return nullSubst
 mgu TDbl TDbl = return nullSubst
 mgu TBool TBool = return nullSubst
 mgu TChar TChar = return nullSubst
-mgu (TMaybe u) (TMaybe v) = mgu u v
+{- mgu (TMaybe u) (TMaybe v) = mgu u v -}
 mgu (TList u) (TList v) = mgu u v
 mgu (TRecord row1) (TRecord row2) = mgu row1 row2
 mgu (TVariant row1) (TVariant row2) = mgu row1 row2
@@ -502,19 +502,19 @@ tcPrim pos prim = annotate pos $ case prim of
     in _TForAll [a,b,c] $ _TFun (_TFun (_TVar b) (_TVar c))
                                     (_TFun (_TFun (_TVar a) (_TVar b))
                                           (_TFun (_TVar a) (_TVar c)))
-  JustPrim               ->
-    let a = newTyVar CNone 'a'
-    in _TForAll [a] $ _TFun (_TVar a) (_TMaybe (_TVar a))
-  NothingPrim            ->
-    let a = newTyVar CNone 'a'
-    in _TForAll [a] $ _TMaybe (_TVar a)
-  MaybePrim              ->
-    let a = newTyVar CNone 'a'
-        b = newTyVar CNone 'b'
-    in _TForAll [a,b] $ _TFun (_TVar b)
-                            (_TFun (_TFun (_TVar a) (_TVar b))
-                                  (_TFun (_TMaybe (_TVar a))
-                                        (_TVar b)))
+  {- JustPrim               -> -}
+    {- let a = newTyVar CNone 'a' -}
+    {- in _TForAll [a] $ _TFun (_TVar a) (_TMaybe (_TVar a)) -}
+  {- NothingPrim            -> -}
+    {- let a = newTyVar CNone 'a' -}
+    {- in _TForAll [a] $ _TMaybe (_TVar a) -}
+  {- MaybePrim              -> -}
+    {- let a = newTyVar CNone 'a' -}
+        {- b = newTyVar CNone 'b' -}
+    {- in _TForAll [a,b] $ _TFun (_TVar b) -}
+                            {- (_TFun (_TFun (_TVar a) (_TVar b)) -}
+                                  {- (_TFun (_TMaybe (_TVar a)) -}
+                                        {- (_TVar b))) -}
   Cond                   ->
     let a = newTyVar CNone 'a'
     in _TForAll [a] $ _TFun _TBool

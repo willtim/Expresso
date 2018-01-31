@@ -25,13 +25,15 @@ let
     ------------------------------------------------------------
     -- Maybe operations
 
+    maybe       = (z f mb -> case mb of { Nothing {} -> z, Just x -> f x })
+                : forall a b r. b -> (a -> b) -> <Nothing : {}, Just : a> -> b;
     isJust      = maybe False (const True);
     isNothing   = maybe True (const False);
     fromMaybe   = x -> maybe x id;
-    listToMaybe = foldr (x -> const (Just x)) Nothing;
+    listToMaybe = foldr (x -> const (Just x)) (Nothing {});
     maybeToList = maybe [] (x -> [x]);
     catMaybes   = xs -> concat (map maybeToList xs);
-    mapMaybe    = f -> maybe Nothing (Just << f);
+    mapMaybe    = f -> maybe (Nothing {}) (Just << f);
 
     ------------------------------------------------------------
     -- Logical operations
@@ -64,6 +66,7 @@ in { id
    , concat
    , intercalate
    , intersperse
+   , maybe
    , isJust
    , isNothing
    , fromMaybe

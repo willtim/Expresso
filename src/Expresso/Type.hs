@@ -56,7 +56,7 @@ data TypeF r
   | TBoolF
   | TCharF
   | TFunF r r
-  | TMaybeF r
+  {- | TMaybeF r -}
   | TListF r
   | TRecordF r
   | TVariantF r
@@ -134,8 +134,8 @@ pattern TChar              <- (proj -> TCharF)
 _TChar = inj TCharF
 pattern TFun t1 t2         <- (proj -> (TFunF t1 t2))
 _TFun t1 t2 = inj (TFunF t1 t2)
-pattern TMaybe t           <- (proj -> (TMaybeF t))
-_TMaybe t = inj (TMaybeF t)
+{- pattern TMaybe t           <- (proj -> (TMaybeF t)) -}
+{- _TMaybe t = inj (TMaybeF t) -}
 pattern TList t            <- (proj -> (TListF t))
 _TList t = inj (TListF t)
 pattern TRecord t          <- (proj -> (TRecordF t))
@@ -289,7 +289,7 @@ satisfies t c =
     infer TBool         = CStar COrd
     infer TChar         = CStar COrd
     infer TFun{}        = CNone
-    infer (TMaybe t)    = minC (CStar COrd) (infer t)
+    {- infer (TMaybe t)    = minC (CStar COrd) (infer t) -}
     infer (TList t)     = minC (CStar COrd) (infer t)
     infer (TRecord r)   =
         maybe CNone (minC (CStar CEq)) $ inferFromRow r
@@ -336,7 +336,7 @@ atomicPrec = 3  -- Precedence of t
 precType :: Type -> Precedence
 precType (TForAll _ _) = topPrec
 precType (TFun _ _)    = arrPrec
-precType (TMaybe _ )   = tcPrec
+{- precType (TMaybe _ )   = tcPrec -}
 precType _             = atomicPrec
 
 -- | Print with parens if precedence arg > precedence of type itself
@@ -354,7 +354,7 @@ ppType TDbl               = "Double"
 ppType TBool              = "Bool"
 ppType TChar              = "Char"
 ppType (TFun t s)         = ppType' arrPrec t <+> "->" <+> ppType' (arrPrec-1) s
-ppType (TMaybe t)         = "Maybe" <+> ppType' tcPrec t
+{- ppType (TMaybe t)         = "Maybe" <+> ppType' tcPrec t -}
 ppType (TList a)          = brackets $ ppType a
 ppType (TRecord r)        = braces $ ppRowType r
 ppType (TVariant r)       = angles $ ppRowType r

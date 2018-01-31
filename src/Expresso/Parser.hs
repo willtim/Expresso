@@ -94,7 +94,7 @@ pVar     = mkVar <$> getPosition <*> identifier
 pPrim    = pNumber           <|>
            pBool             <|>
            pChar             <|>
-           pMaybe            <|>
+           {- pMaybe            <|> -}
            pDifferenceRecord <|>
            pRecord           <|>
            pVariant          <|>
@@ -154,7 +154,7 @@ pPrimFun = msum
   [ fun "error"   ErrorPrim
   , fun "show"    Show
   , fun "not"     Not
-  , fun "maybe"   MaybePrim
+  {- , fun "maybe"   MaybePrim -}
   , fun "foldr"   ListFoldr
   , fun "null"    ListNull
   , fun "fix"     FixPrim
@@ -258,8 +258,8 @@ pCaseAlt =
 
 pVariantLabel = upperIdentifier
 
-pMaybe =  (\pos -> mkPrim pos JustPrim)    <$> getPosition <* reserved "Just"
-      <|> (\pos -> mkPrim pos NothingPrim) <$> getPosition <* reserved "Nothing"
+{- pMaybe =  (\pos -> mkPrim pos JustPrim)    <$> getPosition <* reserved "Just" -}
+      {- <|> (\pos -> mkPrim pos NothingPrim) <$> getPosition <* reserved "Nothing" -}
 
 pList = brackets pListBody
   where
@@ -388,7 +388,7 @@ pType' = pTVar
      <|> pTRecord
      <|> pTVariant
      <|> pTList
-     <|> pTMaybe
+     {- <|> pTMaybe -}
      <|> parens pType
 
 pTForAll = pTForAll'e >>= either (fail . render) return
@@ -502,9 +502,9 @@ pTList = (\pos -> withAnn pos . TListF)
      <$> getPosition
      <*> brackets pType
 
-pTMaybe = (\pos -> withAnn pos . TMaybeF)
-     <$> getPosition
-     <*> (reserved "Maybe" *> pType')
+{- pTMaybe = (\pos -> withAnn pos . TMaybeF) -}
+     {- <$> getPosition -}
+     {- <*> (reserved "Maybe" *> pType') -}
 
 ------------------------------------------------------------
 -- Language definition for Lexer
@@ -526,7 +526,7 @@ languageDef = emptyDef
                          , "&&", "||", ":", "=>"
                          ]
     , P.reservedNames  = [ "let", "in", "if", "then", "else", "case", "of"
-                         , "True", "False", "Just", "Nothing", "forall"
+                         , "True", "False", {-"Just", "Nothing",-} "forall"
                          , "Eq", "Ord", "Num"
                          ]
     , P.caseSensitive  = True
