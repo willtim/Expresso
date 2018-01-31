@@ -1042,12 +1042,29 @@ instance (HasType a, HasType b) => HasType (a -> f b) where
     typeOf p = _TFun (typeOf $ dom p) (typeOf $ inside $ inside p)
 
 instance (ToValue a, FromValue b, MonadEval f) => FromValue (a -> f b) where
-    -- Return in the outer evaluation monad
-    fromValue (VLam f) = pure  $ \x -> either throwError pure $ runEvalM' $ do
+    fromValue (VLam f) = pure  $ \x -> liftEval $ do
       x <- (mkThunk $ pure $ toValue x)
       r <- f x
       fromValue r
+      where
+        -- TODO for now we always run in the pure evaluation monad (which is
+        -- hardcoded in the Value type).
+        --
+        -- This natural transformation lifts the evaluator into the user-providec
+        -- evaluator. In theory we could parameterize (Exp, Value, Type) etc
+        -- on some effect algebra and provide the interpreter function here.
+        liftEval = either throwError pure . runEvalM'
+
     fromValue v           = failfromValue "VLam" v
+
+fv2 :: (MonadEval m, FromValue b, ToValue a) =>
+     Value -> a -> m b
+fv2 = (\f a b -> (f a >>= ($ b))) fromValue
+
+fv3 :: (MonadEval m, FromValue r, ToValue a, ToValue b) =>
+     Value -> a -> b -> m r
+fv3 = (\f a b c -> (f a >>= ($ b) >>= ($ c))) fromValue
+
 
 instance HasType a => HasType [a] where
     typeOf p = _TList $ typeOf (inside p)
