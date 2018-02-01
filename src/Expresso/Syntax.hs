@@ -1,3 +1,4 @@
+{-# LANGUAGE CPP #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -14,6 +15,11 @@ module Expresso.Syntax where
 
 import Expresso.Type
 import Expresso.Utils
+
+#if __GLASGOW_HASKELL__ <= 708
+import Data.Foldable
+import Data.Traversable
+#endif
 
 type ExpI  = Fix ((ExpF Name Bind Type :+: K Import) :*: K Pos)
 type Exp   = Fix (ExpF Name Bind Type :*: K Pos)
@@ -62,14 +68,17 @@ data Prim
   | FixPrim
   | FwdComp
   | BwdComp
-  | JustPrim
-  | NothingPrim
-  | MaybePrim
+
+  {- | JustPrim -}
+  {- | NothingPrim -}
+  {- | MaybePrim -}
+
   | ListEmpty
   | ListCons
   | ListNull    -- needed if list elems have no equality defined
   | ListAppend
   | ListFoldr
+
   | RecordEmpty -- a.k.a. Unit
   | RecordSelect Label
   | RecordExtend Label

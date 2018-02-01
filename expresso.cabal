@@ -1,0 +1,71 @@
+Name:            expresso
+Version:         0.1
+Cabal-Version:   >= 1.8
+License:         GPL-3
+License-File:    LICENSE
+Author:          Tim Williams
+Maintainer:      info@timphilipwilliams.com
+Stability:       Experimental
+Synopsis:        A simple expressions language based on row types
+Build-Type:      Simple
+
+Library
+  Hs-Source-Dirs:  src
+  Build-Depends:   base, containers, hashable, mtl, mtl-compat, void, transformers, parsec, ansi-wl-pprint,
+                   unordered-containers, haskeline, directory, filepath, bytestring, text
+  Exposed-Modules: Expresso
+  Other-Modules:   Expresso.Parser
+                   Expresso.Eval
+                   Expresso.Type
+                   Expresso.TypeCheck
+                   Expresso.Syntax
+                   Expresso.Pretty
+                   Expresso.Utils
+
+  ghc-options:     -O2 -Wall -fwarn-tabs -funbox-strict-fields
+                   -fno-warn-orphans
+                   -fno-warn-unused-do-bind
+                   -fno-warn-name-shadowing
+                   -fno-warn-missing-pattern-synonym-signatures
+                   -fno-warn-unticked-promoted-constructors
+                   -fno-warn-unused-matches
+                   -fno-warn-type-defaults
+
+Executable expresso
+  Main-Is:         Repl.hs
+  Hs-Source-Dirs:  src
+  Build-Depends:   base, containers, hashable, mtl, mtl-compat, void, transformers, parsec, ansi-wl-pprint,
+                   unordered-containers, haskeline, directory, filepath, bytestring, text
+  Other-Modules:   Expresso.Parser
+                   Expresso.Eval
+                   Expresso.Type
+                   Expresso.TypeCheck
+                   Expresso.Syntax
+                   Expresso.Pretty
+                   Expresso.Utils
+                   Expresso
+
+  ghc-options:     -O2 -Wall -fwarn-tabs -funbox-strict-fields
+                   -fno-warn-orphans
+                   -fno-warn-unused-do-bind
+                   -fno-warn-name-shadowing
+                   -fno-warn-missing-pattern-synonym-signatures
+                   -fno-warn-unticked-promoted-constructors
+                   -fno-warn-unused-matches
+                   -fno-warn-type-defaults
+
+Test-Suite test-expresso
+  Type:            exitcode-stdio-1.0
+  Main-Is:         Tests.hs
+  Hs-Source-Dirs:  src
+  Other-Modules:   Expresso
+                   Expresso.Eval
+                   Expresso.Parser
+                   Expresso.Pretty
+                   Expresso.Syntax
+                   Expresso.Type
+                   Expresso.TypeCheck
+                   Expresso.Utils
+  Build-Depends:   base, containers, hashable, mtl, parsec, ansi-wl-pprint,
+                   unordered-containers, haskeline, directory, filepath,
+                   expresso, tasty, tasty-hunit, vinyl, bytestring, text

@@ -1,9 +1,12 @@
+{-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE PatternSynonyms #-}
@@ -13,6 +16,8 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 module Expresso.Type where
+
+import Prelude hiding (foldr, concatMap)
 
 import Text.Parsec (SourcePos)
 import Text.Parsec.Pos (newPos)
@@ -24,7 +29,8 @@ import qualified Data.Map as M
 import qualified Data.IntMap as IM
 import qualified Data.Set as S
 
-import Data.Foldable (fold)
+import Data.Foldable
+import Data.Traversable
 import Data.Monoid
 
 import Expresso.Pretty
@@ -45,13 +51,19 @@ data TypeF r
   = TForAllF  [TyVar] r
   | TVarF     TyVar
   | TMetaVarF MetaTv
-  | TIntF
-  | TDblF
-  | TBoolF
-  | TCharF
+
+  | TBoolF            -- Isomorphic to <True, False>
+  | TCharF            -- Unicode character, isomorphic to <0,2..1114111>
+  | TIntF             -- Integers, isomorphic to <..,-1,0,1,2,..>
+  | TDblF             -- Double precision floating point number
+
+  | TBlobF            -- Isomorphic to [<0..255>]
+  | TTextF            -- Isomorphic to [Char]
+
   | TFunF r r
-  | TMaybeF r
+  {- | TMaybeF r -}
   | TListF r
+
   | TRecordF r
   | TVariantF r
   | TRowEmptyF
@@ -94,6 +106,10 @@ data StarHierarchy
   | CNum
   deriving (Eq, Ord, Show)
 
+{- getMonomorphic :: Scheme -> Maybe Type -}
+{- getMonomorphic (Scheme [] t) = Just t -}
+{- getMonomorphic _ = Nothing -}
+
 newtype TypeEnv = TypeEnv { unTypeEnv :: Map Name Sigma }
   deriving (Monoid)
 
@@ -108,34 +124,38 @@ instance View TypeF Type' where
   proj = unFix
   inj  = Fix
 
-pattern TForAll vs t       <- (proj -> (TForAllF vs t)) where
-  TForAll vs t = inj (TForAllF vs t)
-pattern TVar v             <- (proj -> (TVarF v)) where
-  TVar v = inj (TVarF v)
-pattern TMetaVar v         <- (proj -> (TMetaVarF v)) where
-  TMetaVar v = inj (TMetaVarF v)
-pattern TInt               <- (proj -> TIntF) where
-  TInt = inj TIntF
-pattern TDbl               <- (proj -> TDblF) where
-  TDbl = inj TDblF
-pattern TBool              <- (proj -> TBoolF) where
-  TBool = inj TBoolF
-pattern TChar              <- (proj -> TCharF) where
-  TChar = inj TCharF
-pattern TFun t1 t2         <- (proj -> (TFunF t1 t2)) where
-  TFun t1 t2 = inj (TFunF t1 t2)
-pattern TMaybe t           <- (proj -> (TMaybeF t)) where
-  TMaybe t = inj (TMaybeF t)
-pattern TList t            <- (proj -> (TListF t)) where
-  TList t = inj (TListF t)
-pattern TRecord t          <- (proj -> (TRecordF t)) where
-  TRecord t = inj (TRecordF t)
-pattern TVariant t         <- (proj -> (TVariantF t)) where
-  TVariant t = inj (TVariantF t)
-pattern TRowEmpty          <- (proj -> TRowEmptyF) where
-  TRowEmpty = inj TRowEmptyF
-pattern TRowExtend l t1 t2 <- (proj -> (TRowExtendF l t1 t2)) where
-  TRowExtend l t1 t2 = inj (TRowExtendF l t1 t2)
+pattern TForAll vs t       <- (proj -> (TForAllF vs t))
+_TForAll vs t = inj (TForAllF vs t)
+pattern TVar v             <- (proj -> (TVarF v))
+_TVar v = inj (TVarF v)
+pattern TMetaVar v         <- (proj -> (TMetaVarF v))
+_TMetaVar v = inj (TMetaVarF v)
+pattern TInt               <- (proj -> TIntF)
+_TInt = inj TIntF
+pattern TDbl               <- (proj -> TDblF)
+_TDbl = inj TDblF
+pattern TBool              <- (proj -> TBoolF)
+_TBool = inj TBoolF
+pattern TChar              <- (proj -> TCharF)
+_TChar = inj TCharF
+pattern TText              <- (proj -> TTextF)
+_TText = inj TTextF
+pattern TBlob              <- (proj -> TBlobF)
+_TBlob = inj TBlobF
+pattern TFun t1 t2         <- (proj -> (TFunF t1 t2))
+_TFun t1 t2 = inj (TFunF t1 t2)
+{- pattern TMaybe t           <- (proj -> (TMaybeF t)) -}
+{- _TMaybe t = inj (TMaybeF t) -}
+pattern TList t            <- (proj -> (TListF t))
+_TList t = inj (TListF t)
+pattern TRecord t          <- (proj -> (TRecordF t))
+_TRecord t = inj (TRecordF t)
+pattern TVariant t         <- (proj -> (TVariantF t))
+_TVariant t = inj (TVariantF t)
+pattern TRowEmpty          <- (proj -> TRowEmptyF)
+_TRowEmpty = inj TRowEmptyF
+pattern TRowExtend l t1 t2 <- (proj -> (TRowExtendF l t1 t2))
+_TRowExtend l t1 t2 = inj (TRowExtendF l t1 t2)
 
 class Types a where
   -- | Free type variables
@@ -230,14 +250,14 @@ instance Monoid Subst where
     mappend = composeSubst
 
 --  | decompose a row-type into its constituent parts
-toList :: Type -> ([(Label, Type)], Maybe Type)
-toList v@TVar{}           = ([], Just v)
-toList v@TMetaVar{}       = ([], Just v)
-toList TRowEmpty          = ([], Nothing)
-toList (TRowExtend l t r) =
-    let (ls, mv) = toList r
+rowToList :: Type -> ([(Label, Type)], Maybe Type)
+rowToList v@TVar{}           = ([], Just v)
+rowToList v@TMetaVar{}       = ([], Just v)
+rowToList TRowEmpty          = ([], Nothing)
+rowToList (TRowExtend l t r) =
+    let (ls, mv) = rowToList r
     in ((l, t):ls, mv)
-toList t = error $ "Unexpected row type: " ++ show (ppType t)
+rowToList t = error $ "Unexpected row type: " ++ show (ppType t)
 
 extractMetaTv :: Type -> Maybe MetaTv
 extractMetaTv (TMetaVar v) = Just v
@@ -279,7 +299,7 @@ satisfies t c =
     infer TBool         = CStar COrd
     infer TChar         = CStar COrd
     infer TFun{}        = CNone
-    infer (TMaybe t)    = minC (CStar COrd) (infer t)
+    {- infer (TMaybe t)    = minC (CStar COrd) (infer t) -}
     infer (TList t)     = minC (CStar COrd) (infer t)
     infer (TRecord r)   =
         maybe CNone (minC (CStar CEq)) $ inferFromRow r
@@ -326,7 +346,7 @@ atomicPrec = 3  -- Precedence of t
 precType :: Type -> Precedence
 precType (TForAll _ _) = topPrec
 precType (TFun _ _)    = arrPrec
-precType (TMaybe _ )   = tcPrec
+{- precType (TMaybe _ )   = tcPrec -}
 precType _             = atomicPrec
 
 -- | Print with parens if precedence arg > precedence of type itself
@@ -343,8 +363,10 @@ ppType TInt               = "Int"
 ppType TDbl               = "Double"
 ppType TBool              = "Bool"
 ppType TChar              = "Char"
+ppType TText              = "Text"
+ppType TBlob              = "Blob"
 ppType (TFun t s)         = ppType' arrPrec t <+> "->" <+> ppType' (arrPrec-1) s
-ppType (TMaybe t)         = "Maybe" <+> ppType' tcPrec t
+{- ppType (TMaybe t)         = "Maybe" <+> ppType' tcPrec t -}
 ppType (TList a)          = brackets $ ppType a
 ppType (TRecord r)        = braces $ ppRowType r
 ppType (TVariant r)       = angles $ ppRowType r
@@ -356,7 +378,7 @@ ppRowType :: Type -> Doc
 ppRowType r = sepBy comma (map ppEntry ls)
            <> maybe mempty (ppRowTail ls) mv
   where
-    (ls, mv)       = toList r
+    (ls, mv)       = rowToList r
     ppRowTail [] v = ppType v
     ppRowTail _  v = mempty <+> "|" <+> ppType v
     ppEntry (l, t) = text l <+> ":" <+> ppType t
@@ -364,7 +386,7 @@ ppRowType r = sepBy comma (map ppEntry ls)
 ppForAll :: ([TyVar], Type) -> Doc
 ppForAll (vars, t)
   | null vars = ppType' topPrec t
-  | otherwise = "forall" <+> (catBy space $ map (ppType . TVar) vars) <> dot
+  | otherwise = "forall" <+> (catBy space $ map (ppType . _TVar) vars) <> dot
                          <>  (let cs = concatMap ppConstraint vars
                               in if null cs then mempty else space <> (parensList cs <+> "=>"))
                          <+> ppType' topPrec t
@@ -373,12 +395,12 @@ ppForAll (vars, t)
     ppConstraint v =
       case tyvarConstraint v of
         CNone      -> []
-        CStar CEq  -> ["Eq"  <+> ppType (TVar v)]
-        CStar COrd -> ["Ord" <+> ppType (TVar v)]
-        CStar CNum -> ["Num" <+> ppType (TVar v)]
+        CStar CEq  -> ["Eq"  <+> ppType (_TVar v)]
+        CStar COrd -> ["Ord" <+> ppType (_TVar v)]
+        CStar CNum -> ["Num" <+> ppType (_TVar v)]
         CRow (S.toList -> ls)
             | null ls   -> []
-            | otherwise -> [catBy "\\" $ ppType (TVar v) : map text ls]
+            | otherwise -> [catBy "\\" $ ppType (_TVar v) : map text ls]
 
 ppPos :: Pos -> Doc
 ppPos = text . show

@@ -151,7 +151,7 @@ doCommand c = case c of
 doEval :: (Value -> IO String) -> ExpI -> Repl ()
 doEval pp e = do
   envs <- lift $ gets stateEnv
-  v'e  <- liftIO $ evalWithEnv envs e
+  v'e  <- liftIO $ evalWithEnv' envs e
   case v'e of
       Left err  -> spew err
       Right val -> liftIO (pp val) >>= spew
@@ -159,7 +159,7 @@ doEval pp e = do
 doDecl :: Bind Name -> ExpI -> Repl ()
 doDecl b e = do
   envs   <- lift $ gets stateEnv
-  envs'e <- liftIO $ runEvalM $ bind envs b e
+  envs'e <- liftIO $ fmap pure $ bind envs b e
   case envs'e of
       Left err    -> spew err
       Right envs' -> lift $ modify (setEnv envs')

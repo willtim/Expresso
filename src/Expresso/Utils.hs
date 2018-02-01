@@ -28,7 +28,10 @@ module Expresso.Utils(
 )
 where
 
-import Control.Monad
+import Prelude hiding (mapM)
+import Control.Monad hiding (mapM)
+import Data.Foldable
+import Data.Traversable
 
 
 newtype Fix f = Fix { unFix :: f (Fix f) }

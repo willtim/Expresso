@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 module Expresso.Pretty (
-      module Text.PrettyPrint.Leijen
+      module Text.PrettyPrint.ANSI.Leijen
     , parensList
     , bracketsList
     , bracesList
@@ -9,19 +9,18 @@ module Expresso.Pretty (
     , render
     ) where
 
-import Data.String
-import Text.PrettyPrint.Leijen ( Doc, (<+>), (<//>), angles, braces, brackets
-                               , comma, dot, dquotes, hcat, hsep, indent
-                               , int, integer, double, parens, space, text, string, vcat)
-import qualified Text.PrettyPrint.Leijen as PP
+import Text.PrettyPrint.ANSI.Leijen ( Doc, (<+>), (<//>), angles, braces, brackets
+                                    , comma, dot, dquotes, hcat, hsep, indent
+                                    , int, integer, double, parens, space, text, string, vcat)
+import qualified Text.PrettyPrint.ANSI.Leijen as PP
 
 
-instance IsString Doc where
-  fromString = text
+{- instance IsString Doc where -}
+  {- fromString = text -}
 
-instance Monoid Doc where
-  mempty = PP.empty
-  mappend = (PP.<>)
+{- instance Monoid Doc where -}
+  {- mempty = PP.empty -}
+  {- mappend = (PP.<>) -}
 
 bracketsList :: [Doc] -> Doc
 bracketsList = brackets . hsep . PP.punctuate comma
