@@ -51,13 +51,19 @@ data TypeF r
   = TForAllF  [TyVar] r
   | TVarF     TyVar
   | TMetaVarF MetaTv
-  | TIntF
-  | TDblF
-  | TBoolF
-  | TCharF
+
+  | TBoolF            -- Isomorphic to <True, False>
+  | TCharF            -- Unicode character, isomorphic to <0,2..1114111>
+  | TIntF             -- Integers, isomorphic to <..,-1,0,1,2,..>
+  | TDblF             -- Double precision floating point number
+
+  | TBlobF            -- Isomorphic to [<0..255>]
+  | TTextF            -- Isomorphic to [Char]
+
   | TFunF r r
   {- | TMaybeF r -}
   | TListF r
+
   | TRecordF r
   | TVariantF r
   | TRowEmptyF
@@ -132,6 +138,10 @@ pattern TBool              <- (proj -> TBoolF)
 _TBool = inj TBoolF
 pattern TChar              <- (proj -> TCharF)
 _TChar = inj TCharF
+pattern TText              <- (proj -> TTextF)
+_TText = inj TTextF
+pattern TBlob              <- (proj -> TBlobF)
+_TBlob = inj TBlobF
 pattern TFun t1 t2         <- (proj -> (TFunF t1 t2))
 _TFun t1 t2 = inj (TFunF t1 t2)
 {- pattern TMaybe t           <- (proj -> (TMaybeF t)) -}
@@ -353,6 +363,8 @@ ppType TInt               = "Int"
 ppType TDbl               = "Double"
 ppType TBool              = "Bool"
 ppType TChar              = "Char"
+ppType TText              = "Text"
+ppType TBlob              = "Blob"
 ppType (TFun t s)         = ppType' arrPrec t <+> "->" <+> ppType' (arrPrec-1) s
 {- ppType (TMaybe t)         = "Maybe" <+> ppType' tcPrec t -}
 ppType (TList a)          = brackets $ ppType a

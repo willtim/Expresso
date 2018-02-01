@@ -12,7 +12,7 @@ Build-Type:      Simple
 Library
   Hs-Source-Dirs:  src
   Build-Depends:   base, containers, hashable, mtl, mtl-compat, void, transformers, parsec, ansi-wl-pprint,
-                   unordered-containers, haskeline, directory, filepath
+                   unordered-containers, haskeline, directory, filepath, bytestring, text
   Exposed-Modules: Expresso
   Other-Modules:   Expresso.Parser
                    Expresso.Eval
@@ -35,7 +35,7 @@ Executable expresso
   Main-Is:         Repl.hs
   Hs-Source-Dirs:  src
   Build-Depends:   base, containers, hashable, mtl, mtl-compat, void, transformers, parsec, ansi-wl-pprint,
-                   unordered-containers, haskeline, directory, filepath
+                   unordered-containers, haskeline, directory, filepath, bytestring, text
   Other-Modules:   Expresso.Parser
                    Expresso.Eval
                    Expresso.Type
@@ -68,4 +68,4 @@ Test-Suite test-expresso
                    Expresso.Utils
   Build-Depends:   base, containers, hashable, mtl, parsec, ansi-wl-pprint,
                    unordered-containers, haskeline, directory, filepath,
-                   expresso, tasty, tasty-hunit, vinyl
+                   expresso, tasty, tasty-hunit, vinyl, bytestring, text

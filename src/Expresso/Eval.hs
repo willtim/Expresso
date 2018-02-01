@@ -81,6 +81,8 @@ import Data.Ord
 import qualified Data.Map as Map
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.List as List
+import qualified Data.ByteString.Lazy as LBS
+import qualified Data.Text as T
 import Control.Monad.ST
 import Data.STRef
 import Data.Void
@@ -1097,6 +1099,19 @@ instance ToValue () where
   toValue _ = VRecord mempty
 
 
+instance HasType LBS.ByteString where
+  typeOf _ = _TBlob
+instance ToValue LBS.ByteString where
+  toValue = error "TODO ByteString"
+instance FromValue LBS.ByteString where
+  fromValue = error "TODO ByteString"
+
+instance HasType T.Text where
+  typeOf _ = _TText
+instance ToValue T.Text where
+  toValue = error "TODO Text"
+instance FromValue T.Text where
+  fromValue = error "TODO Text"
 
 instance
 #if __GLASGOW_HASKELL__ > 708

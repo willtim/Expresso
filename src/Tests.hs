@@ -1,6 +1,7 @@
 
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DataKinds #-}
 {-# LANGUAGE KindSignatures #-}
@@ -14,6 +15,8 @@ import Test.Tasty (TestTree, defaultMain, testGroup)
 import Test.Tasty.HUnit (assertEqual, assertFailure, testCase)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
+
+import qualified Data.ByteString.Lazy as LBS
 
 import GHC.Generics
 import GHC.TypeLits
@@ -37,6 +40,7 @@ unitTests = testGroup
   , recordTests
   , variantTests
   , listTests
+  , conversionTests
   , relationalTests
   , constraintTests
   , rankNTests
@@ -180,6 +184,31 @@ variantTests = testGroup
   , illTyped ("let f = x -> case (<|A|> x) of { B{} -> 1, otherwise -> 2 }; " ++
               "let g = x -> case (<|B|> x) of { A{} -> 1, otherwise -> 2 } in " ++
               "x -> f x + f x")
+  ]
+
+conversionTests = testGroup
+  "Type conversions"
+  [
+
+  -- Prism Integer Char
+    hasValue "mapMaybe charToInt (intToChar 2)" (Just (2 :: Integer))
+  , hasValue "intToChar 43" (Just '+')
+
+  -- Iso   [{}} Integer
+  , hasValue "length [{},{}]" (2 :: Integer)
+  , hasValue "repeat {} 2" (replicate 2 ())
+  -- Iso   [Char] Text
+  , hasValue "['a','b']" ("ab"::String)
+  , hasValue "\"ab\"" ("ab"::String)
+
+  -- Iso   [Word8]   Blob (if we had Word8)
+  -- NOTE: There's no Word8 type...
+
+  -- Prism [Integer] Blob
+  -- NOTE: The HasValue instance for Blob may involve downloading...
+  --  TODO add test cases for this as well...
+  , hasValue "packBlob [102,111,111]" (Just ("foo" :: LBS.ByteString))
+  , hasValue "unpackBlob #\"foo\"" [102,111,111::Integer]
   ]
 
 listTests = testGroup
@@ -341,7 +370,7 @@ foreignImportTests = testGroup
   , isValue "1" (1 :: Integer)
   , isValue "True" True
   , isValue "2.5" (2.5 :: Double)
-  , isValue "\"hello\"" "hello"
+  , isValue "\"hello\"" ("hello" :: String)
   , isValue "{}" ()
   , isValue "Just 2" (Just (2 :: Int))
   ]
@@ -352,7 +381,7 @@ foreignExportTests = testGroup
   , hasValue "1" (1 :: Integer)
   , hasValue "True" True
   , hasValue "2.5" (2.5 :: Double)
-  , hasValue "\"hello\"" "hello"
+  , hasValue "\"hello\"" ("hello"::String)
   , hasValue "{}" ()
   , hasValue "Just 2" (Just (2 :: Int))
 
