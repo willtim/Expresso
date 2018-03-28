@@ -62,9 +62,6 @@ data Prim
   | FixPrim
   | FwdComp
   | BwdComp
-  | JustPrim
-  | NothingPrim
-  | MaybePrim
   | ListEmpty
   | ListCons
   | ListNull    -- needed if list elems have no equality defined

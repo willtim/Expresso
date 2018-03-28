@@ -108,11 +108,10 @@ relationalTests = testGroup
   , illTyped "1 == 2 == 3"
   , hasValue "{x = 1, y = True} == {y = True, x = 1}" True -- field order should not matter
   , illTyped "{x = 1, y = True} > {y = True, x = 1}" -- cannot compare records for ordering
+  , hasValue "Just 1 == Just 1" True -- variants can be compared for equality
   , illTyped "Foo 1 > Bar{}" -- cannot compare variants for ordering
   , hasValue "[1,2,3] == [1,2,3]" True -- lists can be compared for equality
   , hasValue "[1,2,3] >= [1,2,2]" True -- lists can be compared for ordering
-  , hasValue "Just 1 == Just 1" True -- maybe can be compared for equality
-  , hasValue "Just 2 >= Just 1" True -- maybe can be compared for ordering
   , hasValue "True&&True"   True
   , hasValue "True||False"  True
   ]
@@ -132,8 +131,8 @@ rankNTests = testGroup
 
 lazyTests = testGroup
   "Lazy evaluation tests using error primitive"
-  [ hasValue "maybe (error \"bang!\") (x -> x == 42) (Just 42)" True
-  , hasValue "{ x = error \"boom!\", y = 42 }.y" (42::Integer)
+  [ -- hasValue "maybe (error \"bang!\") (x -> x == 42) (Just 42)" True
+    hasValue "{ x = error \"boom!\", y = 42 }.y" (42::Integer)
   , hasValue "case Bar (error \"fizzle!\") of { Foo{} -> 0 | otherwise -> 42 }" (42::Integer)
   ]
 

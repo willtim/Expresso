@@ -7,7 +7,7 @@ let
     const = x y -> x;
     flip  = f x y -> (f y x);
 
-    ------------------------------------------------------------
+    ----------------------------------------------------------------
     -- List operations
 
     map         = f -> foldr (x xs -> f x :: xs) [];
@@ -21,18 +21,39 @@ let
         in foldr f [] xs;
     intercalate = xs xss -> concat (intersperse xs xss);
 
-    ------------------------------------------------------------
-    -- Maybe operations
+    ----------------------------------------------------------------
+    -- Maybe operations - smart constructors create closed variants
+
+    just        = x -> Just x
+                : forall a. a -> <Just : a, Nothing : {}>;
+
+    nothing     = Nothing{}
+                : forall a. <Just : a, Nothing : {}>;
+
+    maybe       = b f m -> case m of { Just a -> f a, Nothing{} -> b }
+                : forall a b. b -> (a -> b) -> <Just : a, Nothing : {}> -> b;
 
     isJust      = maybe False (const True);
     isNothing   = maybe True (const False);
     fromMaybe   = x -> maybe x id;
-    listToMaybe = foldr (x -> const (Just x)) Nothing;
+    listToMaybe = foldr (x -> const (just x)) nothing;
     maybeToList = maybe [] (x -> [x]);
     catMaybes   = xs -> concat (map maybeToList xs);
-    mapMaybe    = f -> maybe Nothing (Just << f);
+    mapMaybe    = f -> maybe nothing (just << f);
 
-    ------------------------------------------------------------
+    ----------------------------------------------------------------
+    -- Either operations - smart constructors create closed variants
+
+    left        = x -> Left x
+                : forall a b. a -> <Left : a, Right : b>;
+
+    right       = x -> Right x
+                : forall a b. b -> <Left : a, Right : b>;
+
+    either      = f g m -> case m of { Left a -> f a, Right b -> g b }
+                : forall a b c. (a -> c) -> (b -> c) -> <Left : a, Right : b> -> c;
+
+    ----------------------------------------------------------------
     -- Logical operations
 
     and =  foldr (x y -> x && y) True;
@@ -43,7 +64,7 @@ let
     elem    = x -> any (x' -> x' == x);
     notElem = x -> all (x' -> x' /= x);
 
-    ------------------------------------------------------------
+    ----------------------------------------------------------------
     -- Dynamic binding
 
     withOverride  = overrides f self -> overrides (f self);
@@ -63,6 +84,9 @@ in { id
    , concat
    , intercalate
    , intersperse
+   , just
+   , nothing
+   , maybe
    , isJust
    , isNothing
    , fromMaybe
@@ -70,6 +94,9 @@ in { id
    , maybeToList
    , catMaybes
    , mapMaybe
+   , left
+   , right
+   , either
    , and
    , or
    , any

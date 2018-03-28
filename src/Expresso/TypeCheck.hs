@@ -172,7 +172,6 @@ mgu TInt TInt = return nullSubst
 mgu TDbl TDbl = return nullSubst
 mgu TBool TBool = return nullSubst
 mgu TChar TChar = return nullSubst
-mgu (TMaybe u) (TMaybe v) = mgu u v
 mgu (TList u) (TList v) = mgu u v
 mgu (TRecord row1) (TRecord row2) = mgu row1 row2
 mgu (TVariant row1) (TVariant row2) = mgu row1 row2
@@ -495,19 +494,6 @@ tcPrim pos prim = annotate pos $ case prim of
     in TForAll [a,b,c] $ TFun (TFun (TVar b) (TVar c))
                                     (TFun (TFun (TVar a) (TVar b))
                                           (TFun (TVar a) (TVar c)))
-  JustPrim               ->
-    let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TVar a) (TMaybe (TVar a))
-  NothingPrim            ->
-    let a = newTyVar CNone 'a'
-    in TForAll [a] $ TMaybe (TVar a)
-  MaybePrim              ->
-    let a = newTyVar CNone 'a'
-        b = newTyVar CNone 'b'
-    in TForAll [a,b] $ TFun (TVar b)
-                            (TFun (TFun (TVar a) (TVar b))
-                                  (TFun (TMaybe (TVar a))
-                                        (TVar b)))
   Cond                   ->
     let a = newTyVar CNone 'a'
     in TForAll [a] $ TFun TBool

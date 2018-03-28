@@ -30,11 +30,11 @@ import Data.Monoid
 import Expresso.Pretty
 import Expresso.Utils
 
-type Pos    = SourcePos
-type Label  = String
-type Name   = String
+type Pos   = SourcePos
+type Label = String
+type Name  = String
 
-type Type = Fix (TypeF :*: K Pos)
+type Type  = Fix (TypeF :*: K Pos)
 type Type' = Fix TypeF
 
 type Sigma = Type
@@ -50,7 +50,6 @@ data TypeF r
   | TBoolF
   | TCharF
   | TFunF r r
-  | TMaybeF r
   | TListF r
   | TRecordF r
   | TVariantF r
@@ -124,8 +123,6 @@ pattern TChar              <- (proj -> TCharF) where
   TChar = inj TCharF
 pattern TFun t1 t2         <- (proj -> (TFunF t1 t2)) where
   TFun t1 t2 = inj (TFunF t1 t2)
-pattern TMaybe t           <- (proj -> (TMaybeF t)) where
-  TMaybe t = inj (TMaybeF t)
 pattern TList t            <- (proj -> (TListF t)) where
   TList t = inj (TListF t)
 pattern TRecord t          <- (proj -> (TRecordF t)) where
@@ -279,7 +276,6 @@ satisfies t c =
     infer TBool         = CStar COrd
     infer TChar         = CStar COrd
     infer TFun{}        = CNone
-    infer (TMaybe t)    = minC (CStar COrd) (infer t)
     infer (TList t)     = minC (CStar COrd) (infer t)
     infer (TRecord r)   =
         maybe CNone (minC (CStar CEq)) $ inferFromRow r
@@ -326,7 +322,6 @@ atomicPrec = 3  -- Precedence of t
 precType :: Type -> Precedence
 precType (TForAll _ _) = topPrec
 precType (TFun _ _)    = arrPrec
-precType (TMaybe _ )   = tcPrec
 precType _             = atomicPrec
 
 -- | Print with parens if precedence arg > precedence of type itself
@@ -344,7 +339,6 @@ ppType TDbl               = "Double"
 ppType TBool              = "Bool"
 ppType TChar              = "Char"
 ppType (TFun t s)         = ppType' arrPrec t <+> "->" <+> ppType' (arrPrec-1) s
-ppType (TMaybe t)         = "Maybe" <+> ppType' tcPrec t
 ppType (TList a)          = brackets $ ppType a
 ppType (TRecord r)        = braces $ ppRowType r
 ppType (TVariant r)       = angles $ ppRowType r

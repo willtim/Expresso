@@ -93,7 +93,6 @@ pVar     = mkVar <$> getPosition <*> identifier
 pPrim    = pNumber           <|>
            pBool             <|>
            pChar             <|>
-           pMaybe            <|>
            pDifferenceRecord <|>
            pRecord           <|>
            pVariant          <|>
@@ -153,7 +152,6 @@ pPrimFun = msum
   [ fun "error"   ErrorPrim
   , fun "show"    Show
   , fun "not"     Not
-  , fun "maybe"   MaybePrim
   , fun "foldr"   ListFoldr
   , fun "null"    ListNull
   , fun "fix"     FixPrim
@@ -256,9 +254,6 @@ pCaseAlt =
     <?> "case alternative"
 
 pVariantLabel = upperIdentifier
-
-pMaybe =  (\pos -> mkPrim pos JustPrim)    <$> getPosition <* reserved "Just"
-      <|> (\pos -> mkPrim pos NothingPrim) <$> getPosition <* reserved "Nothing"
 
 pList = brackets pListBody
   where
@@ -387,7 +382,6 @@ pType' = pTVar
      <|> pTRecord
      <|> pTVariant
      <|> pTList
-     <|> pTMaybe
      <|> parens pType
 
 pTForAll = pTForAll'e >>= either (fail . render) return
@@ -501,10 +495,6 @@ pTList = (\pos -> withAnn pos . TListF)
      <$> getPosition
      <*> brackets pType
 
-pTMaybe = (\pos -> withAnn pos . TMaybeF)
-     <$> getPosition
-     <*> (reserved "Maybe" *> pType')
-
 ------------------------------------------------------------
 -- Language definition for Lexer
 
@@ -525,8 +515,7 @@ languageDef = emptyDef
                          , "&&", "||", ":", "=>"
                          ]
     , P.reservedNames  = [ "let", "in", "if", "then", "else", "case", "of"
-                         , "True", "False", "Just", "Nothing", "forall"
-                         , "Eq", "Ord", "Num"
+                         , "True", "False", "forall", "Eq", "Ord", "Num"
                          ]
     , P.caseSensitive  = True
     }

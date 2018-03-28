@@ -203,6 +203,17 @@ The above case expression eliminates a *closed* variant, meaning any value other
 
 Here the unmatched variant is passed to a lambda (with `otherwise` as the parameter). The expression after the bar `|` typically either ignores the variant or delegates it to another function.
 
+### Closed variants
+
+We will often need to create closed variant types. For example, we may want to create a structural type analogous to Haskell's `Maybe a`, having only two constructors: `Nothing` and `Just`. This can be accomplished using smart constructors with type annotations. In the Prelude, we define the equivalent constructors `just` and `nothing`, as well as a fold `maybe` over this closed set:
+
+    just        = x -> Just x  : forall a. a -> <Just : a, Nothing : {}>;
+
+    nothing     = Nothing{}    : forall a. <Just : a, Nothing : {}>;
+
+    maybe       = b f m -> case m of { Just a -> f a, Nothing{} -> b }
+
+
 ### Variant embedding
 
 The dual of record restriction is variant embedding. This allows us to restrict the behaviour exposed by a case expression, by exploiting the non-overlapping field constraints.

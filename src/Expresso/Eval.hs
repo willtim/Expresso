@@ -72,7 +72,6 @@ data Value
   | VBool    !Bool
   | VChar    !Char
   | VString  !String  -- an optimisation
-  | VMaybe   !(Maybe Value)
   | VList    ![Value] -- lists are strict
   | VRecord  !(HashMap Label Thunk) -- field order no defined
   | VVariant !Label !Thunk
@@ -84,7 +83,6 @@ ppValue (VInt  i)   = integer i
 ppValue (VDbl  d)   = double d
 ppValue (VBool b)   = if b then "True" else "False"
 ppValue (VChar c)   = text $ c : []
-ppValue (VMaybe mx) = maybe "Nothing" (\v -> "Just" <+> ppParensValue v) mx
 ppValue (VString s) = string (show s)
 ppValue (VList xs)
     | Just str <- mapM extractChar xs = string $ show str
@@ -94,26 +92,18 @@ ppValue (VRecord m) = bracesList $ map ppEntry $ HashMap.keys m
     ppEntry l = text l <+> "=" <+> "<Thunk>"
 ppValue (VVariant l _) = text l <+> "<Thunk>"
 
-ppParensValue :: Value -> Doc
-ppParensValue v =
-    case v of
-        VMaybe{}   -> parens $ ppValue v
-        VVariant{} -> parens $ ppValue v
-        _          -> ppValue v
-
 -- | This evaluates deeply
 ppValue' :: Value -> EvalM Doc
 ppValue' (VRecord m) = (bracesList . map ppEntry . HashMap.toList)
                            <$> mapM (force >=> ppValue') m
   where
     ppEntry (l, v) = text l <+> text "=" <+> v
-ppValue' (VVariant l t) = (text l <+>) <$> (force >=> ppParensValue') t
+ppValue' (VVariant l t) = (text l <+>) <$> (force >=> ppParensValue) t
 ppValue' v = return $ ppValue v
 
-ppParensValue' :: Value -> EvalM Doc
-ppParensValue' v =
+ppParensValue :: Value -> EvalM Doc
+ppParensValue v =
     case v of
-        VMaybe{}   -> parens <$> ppValue' v
         VVariant{} -> parens <$> ppValue' v
         _          -> ppValue' v
 
@@ -237,14 +227,6 @@ evalPrim pos p = case p of
         return $ VLam $ \x ->
             mkThunk (evalApp pos g x) >>= evalApp pos f
 
-    JustPrim      -> mkStrictLam $ \v -> return $ VMaybe (Just v)
-    NothingPrim   -> VMaybe Nothing
-    MaybePrim     -> VLam $ \x -> return $ mkStrictLam2 $ \f v ->
-        case v of
-            VMaybe (Just v') -> evalApp pos f (Thunk $ return v')
-            VMaybe Nothing   -> force x
-            _                -> failOnValues pos [v]
-
     ListEmpty     -> VList []
     ListNull      -> VLam $ \xs ->
         (VBool . (null :: [Value] -> Bool)) <$> proj' xs
@@ -259,6 +241,7 @@ evalPrim pos p = case p of
         z'  <- force z
         xs' <- proj' xs :: EvalM [Value]
         foldrM g z' xs'
+
     RecordExtend l   -> VLam $ \v -> return $ VLam $ \r ->
         (VRecord . HashMap.insert l v) <$> proj' r
     RecordRestrict l -> VLam $ \r ->
@@ -268,6 +251,7 @@ evalPrim pos p = case p of
         let err = throwError $ show pos ++ " : " ++ l ++ " not found"
         maybe err force (HashMap.lookup l r')
     RecordEmpty -> VRecord mempty
+
     VariantInject l  -> VLam $ \v ->
         return $ VVariant l v
     VariantEmbed _   -> VLam force
@@ -339,11 +323,6 @@ equalValues p (VList xs)   v@VString{}  = do
 equalValues p (VList xs)   (VList ys)
     | length xs == length ys = and <$> zipWithM (equalValues p) xs ys
     | otherwise = return False
-equalValues p (VMaybe m1)  (VMaybe m2)  =
-    case (m1, m2) of
-      (Just v1, Just v2) -> equalValues p v1 v2
-      (Nothing, Nothing) -> return True
-      _                  -> return False
 equalValues p (VRecord m1) (VRecord m2) = do
     (ls1, vs1) <- unzip . recordValues <$> mapM force m1
     (ls2, vs2) <- unzip . recordValues <$> mapM force m2
@@ -379,12 +358,6 @@ compareValues p (VList xs)   (VList ys)   = go xs ys
           if c == EQ
               then go xs' ys'
               else return c
-compareValues p (VMaybe m1)  (VMaybe m2)  =
-    case (m1, m2) of
-      (Just v1, Just v2) -> compareValues p v1 v2
-      (Nothing, Nothing) -> return EQ
-      (Nothing, Just{} ) -> return LT
-      (Just{} , Nothing) -> return GT
 compareValues p v1 v2 = failOnValues p [v1, v2]
 
 -- | Used for equality of records, sorts values by key
@@ -438,11 +411,6 @@ instance HasValue Char where
     proj (VChar c) = return c
     proj v         = failProj "VChar" v
     inj            = VChar
-
-instance HasValue a => HasValue (Maybe a) where
-    proj (VMaybe m) = mapM proj m
-    proj v          = failProj "VMaybe" v
-    inj             = VMaybe . fmap inj
 
 instance {-# OVERLAPS #-} HasValue String where
     proj (VString s) = return s
