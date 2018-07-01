@@ -1,2 +1,6 @@
-dist-newstyle/
 dist/
+
+# Cabal new-style artifacts
+dist-newstyle/
+cabal.project.local
+.ghc.environment.*

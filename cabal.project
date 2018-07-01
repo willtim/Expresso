@@ -1,0 +1,4 @@
+packages:      Expresso.cabal
+jobs:          $ncpus
+documentation: True
+optimization:  False
