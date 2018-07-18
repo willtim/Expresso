@@ -15,13 +15,8 @@ import Text.PrettyPrint.Leijen ( Doc, (<+>), (<//>), angles, braces, brackets
                                , int, integer, double, parens, space, text, string, vcat)
 import qualified Text.PrettyPrint.Leijen as PP
 
-
 instance IsString Doc where
   fromString = text
-
-instance Monoid Doc where
-  mempty = PP.empty
-  mappend = (PP.<>)
 
 bracketsList :: [Doc] -> Doc
 bracketsList = brackets . hsep . PP.punctuate comma
