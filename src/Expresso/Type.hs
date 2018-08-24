@@ -161,7 +161,7 @@ instance Types Type where
     alg (TMetaVarF v :*: K p) =
         case IM.lookup (metaUnique v) (unSubst s) of
             Nothing -> Fix (TMetaVarF v :*: K p)
-            Just t  -> t -- TODO
+            Just t  -> apply s t -- TODO could this ever fail to terminate?
     alg e = Fix e
 
 instance Types TypeEnv where
