@@ -30,7 +30,7 @@ Library
 Executable expresso
   Main-Is:         Repl.hs
   Hs-Source-Dirs:  src
-  Build-Depends:   base, containers, hashable, mtl, parsec, wl-pprint >= 1.2.1,
+  Build-Depends:   base, containers, hashable, mtl, parsec, wl-pprint,
                    unordered-containers, haskeline, directory, filepath
   Other-Modules:   Expresso.Parser
                    Expresso.Eval

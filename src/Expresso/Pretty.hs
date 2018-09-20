@@ -11,12 +11,16 @@ module Expresso.Pretty (
 
 import Data.String
 import Text.PrettyPrint.Leijen ( Doc, (<+>), (<//>), angles, braces, brackets
-                               , comma, dot, dquotes, hcat, hsep, indent
+                               , comma, dot, dquotes, empty, hcat, hsep, indent
                                , int, integer, double, parens, space, text, string, vcat)
 import qualified Text.PrettyPrint.Leijen as PP
 
 instance IsString Doc where
   fromString = text
+
+instance Monoid Doc where
+    mappend = (PP.<>)
+    mempty  = empty
 
 bracketsList :: [Doc] -> Doc
 bracketsList = brackets . hsep . PP.punctuate comma

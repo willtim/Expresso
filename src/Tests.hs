@@ -17,6 +17,7 @@ unitTests = testGroup
   , variantTests
   , listTests
   , relationalTests
+  , inferenceTests
   , constraintTests
   , rankNTests
   , lazyTests
@@ -116,6 +117,12 @@ relationalTests = testGroup
   , hasValue "True||False"  True
   ]
 
+inferenceTests = testGroup
+  "Type inference tests"
+  [ hasType "n d -> if d == 0 then DivBy0 {} else Ok (n / d)"
+            "forall r. (r\\DivBy0\\Ok) => Int -> Int -> <DivBy0 : {}, Ok : Int | r>"
+  ]
+
 constraintTests = testGroup
   "Constraint violations"
   [ illTyped "show { x = \"test\", y = Just (x -> x) }"
@@ -142,6 +149,13 @@ hasValue str expected = testCase str $ do
     case result of
         Left err     -> assertFailure err
         Right actual -> assertEqual "" expected actual
+
+hasType :: String -> String -> TestTree
+hasType str expected = testCase str $ do
+    result <- typeOfString str
+    case result of
+        Left err     -> assertFailure err
+        Right actual -> assertEqual "" expected (showType actual)
 
 illTyped :: String -> TestTree
 illTyped str = testCase str $ do
