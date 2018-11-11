@@ -25,7 +25,6 @@ import qualified Data.IntMap as IM
 import qualified Data.Set as S
 
 import Data.Foldable (fold)
-import Data.Monoid
 
 import Expresso.Pretty
 import Expresso.Utils
@@ -94,7 +93,7 @@ data StarHierarchy
   deriving (Eq, Ord, Show)
 
 newtype TypeEnv = TypeEnv { unTypeEnv :: Map Name Sigma }
-  deriving (Monoid)
+  deriving (Semigroup, Monoid)
 
 instance View TypeF Type where
   proj    = left . unFix
@@ -201,7 +200,7 @@ substTyVar tvs ts t = cata alg t m where
   m = M.fromList $ (map tyvarName tvs) `zip` ts
 
 newtype Subst = Subst { unSubst :: IntMap Type }
-  deriving Show
+  deriving (Show)
 
 nullSubst :: Subst
 nullSubst = Subst IM.empty
@@ -222,9 +221,11 @@ removeFromSubst vs (Subst m) =
 composeSubst :: Subst -> Subst -> Subst
 composeSubst s1 s2 = Subst $ (IM.map (apply s1) $ unSubst s2) `IM.union` unSubst s1
 
+instance Semigroup Subst where
+    (<>) = composeSubst
+
 instance Monoid Subst where
-    mempty  = nullSubst
-    mappend = composeSubst
+    mempty = nullSubst
 
 --  | decompose a row-type into its constituent parts
 toList :: Type -> ([(Label, Type)], Maybe Type)

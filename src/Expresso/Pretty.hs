@@ -18,10 +18,6 @@ import qualified Text.PrettyPrint.Leijen as PP
 instance IsString Doc where
   fromString = text
 
-instance Monoid Doc where
-    mappend = (PP.<>)
-    mempty  = empty
-
 bracketsList :: [Doc] -> Doc
 bracketsList = brackets . hsep . PP.punctuate comma
 

@@ -8,7 +8,6 @@ import Control.Applicative
 import Control.Monad
 import Control.Monad.Except
 import Data.Maybe
-import Data.Monoid
 import Text.Parsec hiding (many, optional, parse, (<|>))
 import Text.Parsec.Language (emptyDef)
 import qualified Data.Map as M

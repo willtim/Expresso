@@ -35,7 +35,6 @@ import Control.Applicative ((<$>))
 import Control.Monad.Except
 import Control.Monad.Reader
 import Control.Monad.State
-import Data.Monoid
 
 import Expresso.Syntax
 import Expresso.Type

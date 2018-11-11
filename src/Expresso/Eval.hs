@@ -32,7 +32,6 @@ import Control.Monad.Except
 import Data.Foldable (foldrM)
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
-import Data.Monoid
 import Data.Ord
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.List as List
