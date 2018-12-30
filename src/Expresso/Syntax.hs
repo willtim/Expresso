@@ -23,6 +23,7 @@
 --
 module Expresso.Syntax where
 
+import Data.Text (Text)
 import Expresso.Type
 import Expresso.Utils
 
@@ -61,7 +62,7 @@ data Prim
   | Dbl Double
   | Bool Bool
   | Char Char
-  | String String
+  | Text Text
   | Show
   | Trace
   | ErrorPrim
@@ -82,6 +83,8 @@ data Prim
   | FixPrim
   | FwdComp
   | BwdComp
+  | Pack
+  | Unpack
   | ListEmpty
   | ListCons
   | ListNull    -- needed if list elems have no equality defined

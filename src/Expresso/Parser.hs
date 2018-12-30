@@ -24,6 +24,7 @@ import Text.Parsec hiding (many, optional, parse, (<|>))
 import Text.Parsec.Language (emptyDef)
 import qualified Data.Map as M
 import qualified Data.Set as S
+import qualified Data.Text as T
 import qualified Text.Parsec as P
 import qualified Text.Parsec.Expr as P
 import qualified Text.Parsec.Token as P
@@ -47,7 +48,9 @@ resolveImports = cataM alg where
 -- Parser
 
 parse :: SourceName -> String -> Either String ExpI
-parse src = showError . P.parse (whiteSpace *> pExp <* P.eof) src
+parse src = showError . P.parse (topLevel pExp) src
+
+topLevel p = whiteSpace *> p <* P.eof
 
 pExp     = addTypeAnnot
        <$> getPosition
@@ -172,6 +175,8 @@ pPrimFun = msum
   , fun "abs"     Abs
   , fun "mod"     Mod
   , fun "absurd"  Absurd
+  , fun "pack"    Pack
+  , fun "unpack"  Unpack
   ]
   where
     fun sym prim = reserved sym *> ((\pos -> mkPrim pos prim) <$> getPosition)
@@ -196,7 +201,7 @@ pChar = (\pos -> mkPrim pos . Char)
      <$> getPosition
      <*> charLiteral
 
-pString = (\pos -> mkPrim pos . String)
+pString = (\pos -> mkPrim pos . Text . T.pack)
        <$> getPosition
        <*> stringLiteral
 
@@ -390,6 +395,7 @@ pType' = pTVar
      <|> pTDbl
      <|> pTBool
      <|> pTChar
+     <|> pTText
      <|> pTRecord
      <|> pTVariant
      <|> pTList
@@ -460,6 +466,7 @@ pTInt  = pTCon TIntF "Int"
 pTDbl  = pTCon TDblF "Double"
 pTBool = pTCon TBoolF "Bool"
 pTChar = pTCon TCharF "Char"
+pTText = pTCon TTextF "Text"
 
 pTFun = (\pos a b -> withAnn pos (TFunF a b))
      <$> getPosition

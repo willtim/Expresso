@@ -69,6 +69,7 @@ data TypeF r
   | TDblF
   | TBoolF
   | TCharF
+  | TTextF
   | TFunF r r
   | TListF r
   | TRecordF r
@@ -143,6 +144,8 @@ pattern TBool              <- (proj -> TBoolF) where
   TBool = inj TBoolF
 pattern TChar              <- (proj -> TCharF) where
   TChar = inj TCharF
+pattern TText              <- (proj -> TTextF) where
+  TText = inj TTextF
 pattern TFun t1 t2         <- (proj -> (TFunF t1 t2)) where
   TFun t1 t2 = inj (TFunF t1 t2)
 pattern TList t            <- (proj -> (TListF t)) where
@@ -299,6 +302,7 @@ satisfies t c =
     infer TDbl          = CStar CNum
     infer TBool         = CStar COrd
     infer TChar         = CStar COrd
+    infer TText         = CStar COrd
     infer TFun{}        = CNone
     infer (TList t)     = minC (CStar COrd) (infer t)
     infer (TRecord r)   =
@@ -362,6 +366,7 @@ ppType TInt               = "Int"
 ppType TDbl               = "Double"
 ppType TBool              = "Bool"
 ppType TChar              = "Char"
+ppType TText              = "Text"
 ppType (TFun t s)         = ppType' arrPrec t <+> "->" <+> ppType' (arrPrec-1) s
 ppType (TList a)          = brackets $ ppType a
 ppType (TRecord r)        = braces $ ppRowType r

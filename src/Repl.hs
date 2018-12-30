@@ -28,7 +28,7 @@ import qualified System.Console.Haskeline as HL
 import qualified Text.Parsec as P
 
 import Expresso
-import Expresso.Parser ( pExp, pLetDecl, whiteSpace
+import Expresso.Parser ( pExp, pLetDecl, topLevel
                        , reserved, reservedOp, stringLiteral
                        )
 import Expresso.Utils
@@ -192,7 +192,7 @@ doDumpEnv = do
 parseLine :: String -> Either String Line
 parseLine str
   | all isSpace str = return NoOp
-  | otherwise = showError $ P.parse (whiteSpace *> pLine <* P.eof) "<interactive>" str
+  | otherwise = showError $ P.parse (topLevel pLine) "<interactive>" str
 
 pLine :: Parser Line
 pLine = pCommand <|> P.try pTerm <|> pDecl

@@ -184,6 +184,7 @@ mgu TInt TInt = return nullSubst
 mgu TDbl TDbl = return nullSubst
 mgu TBool TBool = return nullSubst
 mgu TChar TChar = return nullSubst
+mgu TText TText = return nullSubst
 mgu (TList u) (TList v) = mgu u v
 mgu (TRecord row1) (TRecord row2) = mgu row1 row2
 mgu (TVariant row1) (TVariant row2) = mgu row1 row2
@@ -455,18 +456,18 @@ tcPrim pos prim = annotate pos $ case prim of
   Dbl{}                  -> TDbl
   Bool{}                 -> TBool
   Char{}                 -> TChar
-  String{}               -> TList TChar
+  Text{}                 -> TText
   Show                   ->
     -- use an Eq constraint, to prevent attempting to show lambdas
     let a = newTyVar (CStar CEq) 'a'
-    in TForAll [a] $ TFun (TVar a) (TList TChar)
+    in TForAll [a] $ TFun (TVar a) TText
   Trace                  ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TFun (TList TChar) (TVar a))
-                                (TVar a)
+    in TForAll [a] $ TFun (TFun TText (TVar a))
+                          (TVar a)
   ErrorPrim              ->
     let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TList TChar) (TVar a)
+    in TForAll [a] $ TFun TText (TVar a)
 
   ArithPrim{}            ->
     binOp  $ newTyVar (CStar CNum) 'a'
@@ -506,6 +507,8 @@ tcPrim pos prim = annotate pos $ case prim of
     in TForAll [a,b,c] $ TFun (TFun (TVar b) (TVar c))
                                     (TFun (TFun (TVar a) (TVar b))
                                           (TFun (TVar a) (TVar c)))
+  Pack                   -> TFun (TList TChar) TText
+  Unpack                 -> TFun TText (TList TChar)
   Cond                   ->
     let a = newTyVar CNone 'a'
     in TForAll [a] $ TFun TBool

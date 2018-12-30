@@ -40,6 +40,8 @@ import Data.Foldable (foldrM)
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
 import Data.Ord
+import Data.Text (Text)
+import qualified Data.Text as T
 import qualified Data.HashMap.Strict as HashMap
 import qualified Data.List as List
 
@@ -78,7 +80,7 @@ data Value
   | VDbl     !Double
   | VBool    !Bool
   | VChar    !Char
-  | VString  !String  -- an optimisation
+  | VText    !Text
   | VList    ![Value] -- lists are strict
   | VRecord  !(HashMap Label Thunk) -- field order no defined
   | VVariant !Label !Thunk
@@ -89,11 +91,9 @@ ppValue (VLam  _)   = "<Lambda>"
 ppValue (VInt  i)   = integer i
 ppValue (VDbl  d)   = double d
 ppValue (VBool b)   = if b then "True" else "False"
-ppValue (VChar c)   = text $ c : []
-ppValue (VString s) = string (show s)
-ppValue (VList xs)
-    | Just str <- mapM extractChar xs = string $ show str
-    | otherwise     = bracketsList $ map ppValue xs
+ppValue (VChar c)   = text $ '\'' : c : '\'' : []
+ppValue (VText s)   = string (show $ T.unpack s)
+ppValue (VList xs)  = bracketsList $ map ppValue xs
 ppValue (VRecord m) = bracesList $ map ppEntry $ HashMap.keys m
   where
     ppEntry l = text l <+> "=" <+> "<Thunk>"
@@ -158,8 +158,8 @@ evalPrim pos p = case p of
     Dbl d         -> VDbl d
     Bool b        -> VBool b
     Char c        -> VChar c
-    String s      -> VString s
-    Show          -> mkStrictLam $ \v -> VString . show <$> ppValue' v
+    Text s        -> VText s
+    Show          -> mkStrictLam $ \v -> VText . T.pack . show <$> ppValue' v
     -- Trace
     ErrorPrim     -> VLam $ \s -> do
         msg <- proj' s
@@ -234,6 +234,9 @@ evalPrim pos p = case p of
     BwdComp    -> mkStrictLam2 $ \f g ->
         return $ VLam $ \x ->
             mkThunk (evalApp pos g x) >>= evalApp pos f
+
+    Pack          -> mkStrictLam $ packChars pos
+    Unpack        -> mkStrictLam $ unpackChars pos
 
     ListEmpty     -> VList []
     ListNull      -> VLam $ \xs ->
@@ -317,18 +320,12 @@ numOp p _  v1       v2       = failOnValues p [v1, v2]
 
 -- NB: evaluates deeply
 equalValues :: Pos -> Value -> Value -> EvalM Bool
-equalValues _ (VInt i1)    (VInt i2)    = return $ i1 == i2
-equalValues _ (VDbl d1)    (VDbl d2)    = return $ d1 == d2
-equalValues _ (VBool b1)   (VBool b2)   = return $ b1 == b2
-equalValues _ (VChar c1)   (VChar c2)   = return $ c1 == c2
-equalValues _ (VString s1) (VString s2) = return $ s1 == s2
-equalValues p v@VString{}  (VList xs)   = do
-    v' <- toString p xs
-    equalValues p v v'
-equalValues p (VList xs)   v@VString{}  = do
-    v' <- toString p xs
-    equalValues p v' v
-equalValues p (VList xs)   (VList ys)
+equalValues _ (VInt i1)  (VInt i2)  = return $ i1 == i2
+equalValues _ (VDbl d1)  (VDbl d2)  = return $ d1 == d2
+equalValues _ (VBool b1) (VBool b2) = return $ b1 == b2
+equalValues _ (VChar c1) (VChar c2) = return $ c1 == c2
+equalValues _ (VText s1) (VText s2) = return $ s1 == s2
+equalValues p (VList xs) (VList ys)
     | length xs == length ys = and <$> zipWithM (equalValues p) xs ys
     | otherwise = return False
 equalValues p (VRecord m1) (VRecord m2) = do
@@ -344,18 +341,12 @@ equalValues p v1 v2 = failOnValues p [v1, v2]
 
 -- NB: evaluates deeply
 compareValues :: Pos -> Value -> Value -> EvalM Ordering
-compareValues _ (VInt i1)    (VInt i2)    = return $ compare i1 i2
-compareValues _ (VDbl d1)    (VDbl d2)    = return $ compare d1 d2
-compareValues _ (VBool b1)   (VBool b2)   = return $ compare b1 b2
-compareValues _ (VChar c1)   (VChar c2)   = return $ compare c1 c2
-compareValues _ (VString s1) (VString s2) = return $ compare s1 s2
-compareValues p v@VString{}  (VList xs)   = do
-    v' <- toString p xs
-    compareValues p v v'
-compareValues p (VList xs)   v@VString{}  = do
-    v' <- toString p xs
-    compareValues p v' v
-compareValues p (VList xs)   (VList ys)   = go xs ys
+compareValues _ (VInt i1)  (VInt i2)  = return $ compare i1 i2
+compareValues _ (VDbl d1)  (VDbl d2)  = return $ compare d1 d2
+compareValues _ (VBool b1) (VBool b2) = return $ compare b1 b2
+compareValues _ (VChar c1) (VChar c2) = return $ compare c1 c2
+compareValues _ (VText s1) (VText s2) = return $ compare s1 s2
+compareValues p (VList xs) (VList ys) = go xs ys
   where
     go :: [Value] -> [Value] -> EvalM Ordering
     go []      []      = return EQ
@@ -372,11 +363,15 @@ compareValues p v1 v2 = failOnValues p [v1, v2]
 recordValues :: HashMap Label a -> [(Label, a)]
 recordValues = List.sortBy (comparing fst) . HashMap.toList
 
--- | Optimise a list of chars
-toString :: Pos -> [Value] -> EvalM Value
-toString pos xs
-    | Just cs <- mapM extractChar xs = return $ VString cs
+packChars :: Pos -> Value -> EvalM Value
+packChars pos (VList xs)
+    | Just cs <- mapM extractChar xs = return . VText . T.pack $ cs
     | otherwise = failOnValues pos xs
+packChars pos v = failOnValues pos [v]
+
+unpackChars :: Pos -> Value -> EvalM Value
+unpackChars _   (VText s) = return . VList . map VChar . T.unpack $ s
+unpackChars pos v = failOnValues pos [v]
 
 ------------------------------------------------------------
 -- HasValue class and instances
@@ -422,19 +417,18 @@ instance HasValue Char where
     proj v         = failProj "VChar" v
     inj            = VChar
 
-instance {-# OVERLAPS #-} HasValue String where
-    proj (VString s) = return s
-    proj v           = failProj "VString" v
-    inj              = VString
+instance HasValue Text where
+    proj (VText s) = return s
+    proj v         = failProj "VText" v
+    inj            = VText
 
-instance HasValue a => HasValue [a] where
+instance {-# OVERLAPS #-} HasValue a => HasValue [a] where
     proj (VList xs) = mapM proj xs
     proj v          = failProj "VList" v
     inj             = VList . map inj
 
 instance {-# OVERLAPS #-} HasValue [Value] where
     proj (VList xs)  = return xs
-    proj (VString s) = return $ map VChar s
     proj v           = failProj "VList" v
     inj              = VList
 
