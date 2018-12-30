@@ -1,4 +1,16 @@
 {-# LANGUAGE OverloadedStrings #-}
+
+-- |
+-- Module      : Expresso.Pretty
+-- Copyright   : (c) Tim Williams 2017-2019
+-- License     : BSD3
+--
+-- Maintainer  : info@timphilipwilliams.com
+-- Stability   : experimental
+-- Portability : portable
+--
+-- Pretty printing utilities.
+--
 module Expresso.Pretty (
       module Text.PrettyPrint.Leijen
     , parensList

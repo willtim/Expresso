@@ -12,6 +12,18 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE ViewPatterns #-}
+
+-- |
+-- Module      : Expresso.Type
+-- Copyright   : (c) Tim Williams 2017-2019
+-- License     : BSD3
+--
+-- Maintainer  : info@timphilipwilliams.com
+-- Stability   : experimental
+-- Portability : portable
+--
+-- The abstract syntax for types in Expresso.
+--
 module Expresso.Type where
 
 import Text.Parsec (SourcePos)
@@ -29,17 +41,26 @@ import Data.Foldable (fold)
 import Expresso.Pretty
 import Expresso.Utils
 
+-- | Source position
 type Pos   = SourcePos
+
+-- | Row label
 type Label = String
+
+-- | A string representing a unique name.
 type Name  = String
 
+-- | Type syntax annotated with source position.
 type Type  = Fix (TypeF :*: K Pos)
+
+-- | Unannotated type syntax.
 type Type' = Fix TypeF
 
 type Sigma = Type
 type Rho   = Type  -- No top-level ForAll
 type Tau   = Type  -- No ForAlls anywhere
 
+-- | Pattern functor for the syntax of types.
 data TypeF r
   = TForAllF  [TyVar] r
   | TVarF     TyVar
@@ -92,6 +113,7 @@ data StarHierarchy
   | CNum
   deriving (Eq, Ord, Show)
 
+-- | The type environment.
 newtype TypeEnv = TypeEnv { unTypeEnv :: Map Name Sigma }
   deriving (Semigroup, Monoid)
 
@@ -99,6 +121,7 @@ instance View TypeF Type where
   proj    = left . unFix
   inj  e  = Fix (e :*: K dummyPos)
 
+-- | A useless source position.
 dummyPos :: Pos
 dummyPos = newPos "<unknown>" 1 1
 

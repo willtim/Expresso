@@ -9,7 +9,15 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 
-----------------------------------------------------------------------
+-- |
+-- Module      : Expresso.TypeCheck
+-- Copyright   : (c) Tim Williams 2017-2019
+-- License     : BSD3
+--
+-- Maintainer  : info@timphilipwilliams.com
+-- Stability   : experimental
+-- Portability : portable
+--
 -- Type inference and checking.
 --
 -- The type system implemented here is a bi-directional Damas-Milner system extended with
@@ -17,6 +25,10 @@
 --
 -- The algorithm is described in detail by the tutorial paper:
 -- "Practical type inference for arbitrary-rank types" Peyton-Jones et al. 2011.
+--
+-- The row-types extension is based on ideas from the following papers:
+-- * "A Polymorphic Type System for Extensible Records and Variants" B. R. Gaster and M. P. Jones, 1996.
+-- * "Extensible records with scoped labels"  D. Leijen, 2005.
 --
 module Expresso.TypeCheck (
       typeCheck
@@ -41,7 +53,7 @@ import Expresso.Type
 import Expresso.Pretty
 import Expresso.Utils
 
-
+-- | Internal state of the inference engine.
 data TIState = TIState
     { tiSupply :: Int
     , tiSubst  :: Subst
@@ -52,6 +64,7 @@ type TI a = ExceptT String (ReaderT TypeEnv (State TIState)) a
 runTI :: TI a -> TypeEnv -> TIState -> (Either String a, TIState)
 runTI t tEnv tState = runState (runReaderT (runExceptT t) tEnv) tState
 
+-- | Initial state of the inference engine.
 initTIState :: TIState
 initTIState = TIState { tiSupply = 0, tiSubst = mempty }
 

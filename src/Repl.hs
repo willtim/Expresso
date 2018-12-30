@@ -1,7 +1,15 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 
-------------------------------------------------------------
--- Expresso Read-Eval-Print-Loop
+-- |
+-- Module      : Main
+-- Copyright   : (c) Tim Williams 2017-2019
+-- License     : BSD3
+--
+-- Maintainer  : info@timphilipwilliams.com
+-- Stability   : experimental
+-- Portability : portable
+--
+-- Expresso Read-Eval-Print-Loop.
 --
 module Main where
 

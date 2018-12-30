@@ -2,6 +2,18 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
+
+-- |
+-- Module      : Expresso.Parser
+-- Copyright   : (c) Tim Williams 2017-2019
+-- License     : BSD3
+--
+-- Maintainer  : info@timphilipwilliams.com
+-- Stability   : experimental
+-- Portability : portable
+--
+-- Parsers for Expresso terms and types.
+--
 module Expresso.Parser where
 
 import Control.Applicative

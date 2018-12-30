@@ -6,6 +6,18 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE UndecidableInstances #-}
+
+-- |
+-- Module      : Expresso.Utils
+-- Copyright   : (c) Tim Williams 2017-2019
+-- License     : BSD3
+--
+-- Maintainer  : info@timphilipwilliams.com
+-- Stability   : experimental
+-- Portability : portable
+--
+-- Recursion scheme utilities.
+--
 module Expresso.Utils(
   Fix(..),
   K(..),
@@ -29,7 +41,6 @@ module Expresso.Utils(
 where
 
 import Control.Monad
-
 
 newtype Fix f = Fix { unFix :: f (Fix f) }
 

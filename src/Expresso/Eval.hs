@@ -7,7 +7,14 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
 
-------------------------------------------------------------
+-- |
+-- Module      : Expresso.Eval
+-- Copyright   : (c) Tim Williams 2017-2019
+-- License     : BSD3
+--
+-- Maintainer  : info@timphilipwilliams.com
+-- Stability   : experimental
+-- Portability : portable
 --
 -- A lazy evaluator.
 --
@@ -41,8 +48,8 @@ import Expresso.Type
 import Expresso.Pretty
 import Expresso.Utils (cata, (:*:)(..), K(..))
 
--- call-by-need environment
--- A HashMap makes it easy to support record wildcards
+-- | A call-by-need environment.
+-- Using a HashMap makes it easy to support record wildcards.
 type Env = HashMap Name Thunk
 
 type EvalM a = ExceptT String IO a
@@ -64,6 +71,7 @@ mkThunk ev = do
               return v
           Just v  -> return v
 
+-- | Type for an evaluated term.
 data Value
   = VLam     !(Thunk -> EvalM Value)
   | VInt     !Integer
@@ -110,6 +118,7 @@ extractChar :: Value -> Maybe Char
 extractChar (VChar c) = Just c
 extractChar _ = Nothing
 
+-- | Run the EvalM evaluation computation.
 runEvalM :: EvalM a -> IO (Either String a)
 runEvalM = runExceptT
 
@@ -383,6 +392,8 @@ instance (HasValue a, HasValue b) => HasValue (a -> EvalM b) where
     proj v        = failProj "VLam" v
     inj f         = VLam $ \v -> proj' v >>= fmap inj . f
 
+-- | A class of Haskell types that can be projected from or injected
+-- into Expresso values.
 class HasValue a where
     proj :: Value -> EvalM a
     inj  :: a -> Value
