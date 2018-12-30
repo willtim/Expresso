@@ -1,7 +1,7 @@
 Name:            expresso
 Version:         0.1
 Cabal-Version:   >= 1.8
-License:         GPL-3
+License:         BSD3 
 License-File:    LICENSE
 Author:          Tim Williams
 Maintainer:      info@timphilipwilliams.com
@@ -54,3 +54,11 @@ Test-Suite test-expresso
   Build-Depends:   base, containers, hashable, mtl, parsec, wl-pprint,
                    unordered-containers, haskeline, directory, filepath,
                    expresso, tasty, tasty-hunit
+  Other-Modules:   Expresso
+                   Expresso.Eval
+                   Expresso.Parser
+                   Expresso.Pretty
+                   Expresso.Syntax
+                   Expresso.Type
+                   Expresso.TypeCheck
+                   Expresso.Utils
