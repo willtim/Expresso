@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
@@ -36,6 +37,7 @@ import qualified Data.Map as M
 import qualified Data.IntMap as IM
 import qualified Data.Set as S
 
+import Data.Data
 import Data.Foldable (fold)
 
 import Expresso.Pretty
@@ -76,7 +78,7 @@ data TypeF r
   | TVariantF r
   | TRowEmptyF
   | TRowExtendF Label r r
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable, Typeable, Data)
 
 type Uniq = Int
 
@@ -84,20 +86,20 @@ data Flavour
   = Bound    -- a type variable bound by a ForAll
   | Skolem   -- a skolem constant
   | Wildcard -- a type wildcard
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Typeable, Data)
 
 data TyVar = TyVar
   { tyvarFlavour    :: Flavour
   , tyvarName       :: Name
   , tyvarPrefix     :: Char -- used to generate names
   , tyvarConstraint :: Constraint
-  } deriving (Eq, Ord, Show)
+  } deriving (Eq, Ord, Show, Typeable, Data)
 
 data MetaTv = MetaTv  -- can unify with any tau-type
   { metaUnique      :: Uniq
   , metaPrefix      :: Char -- used to generate names
   , metaConstraint  :: Constraint
-  } deriving (Eq, Ord, Show)
+  } deriving (Eq, Ord, Show, Typeable, Data)
 
 -- | Type variable constraints
 -- e.g. for types of kind row, labels the associated tyvar must lack
@@ -105,14 +107,14 @@ data Constraint
   = CNone
   | CRow  (Set Label)
   | CStar StarHierarchy
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Typeable, Data)
 
 -- | A simple hierarchy. i.e. Num has Ord and Eq, Ord has Eq.
 data StarHierarchy
   = CEq
   | COrd
   | CNum
-  deriving (Eq, Ord, Show)
+  deriving (Eq, Ord, Show, Typeable, Data)
 
 -- | The type environment.
 newtype TypeEnv = TypeEnv { unTypeEnv :: Map Name Sigma }

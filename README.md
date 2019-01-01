@@ -299,3 +299,10 @@ Turing equivalence is introduced via a single `fix` primitive, which can be easi
 
     λ> override r {| x := "baz" |}
     {override_ = <Lambda>, x = "baz", y = "bazbar"}
+
+## References
+
+Expresso is built upon many ideas described in the following publications:
+* "Practical type inference for arbitrary-rank types" Peyton-Jones et al. 2011.
+* "A Polymorphic Type System for Extensible Records and Variants" B. R. Gaster and M. P. Jones, 1996.
+* "Extensible records with scoped labels" D. Leijen, 2005.

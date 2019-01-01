@@ -28,7 +28,7 @@
 --
 -- The row-types extension is based on ideas from the following papers:
 -- * "A Polymorphic Type System for Extensible Records and Variants" B. R. Gaster and M. P. Jones, 1996.
--- * "Extensible records with scoped labels"  D. Leijen, 2005.
+-- * "Extensible records with scoped labels" D. Leijen, 2005.
 --
 module Expresso.TypeCheck (
       typeCheck
@@ -61,6 +61,11 @@ data TIState = TIState
 
 type TI a = ExceptT String (ReaderT TypeEnv (State TIState)) a
 
+-- | Type check the supplied expression.
+typeCheck :: Exp -> TI Sigma
+typeCheck e = tcRho e Nothing >>= inferSigma (getAnn e)
+
+-- | Run the type inference monad.
 runTI :: TI a -> TypeEnv -> TIState -> (Either String a, TIState)
 runTI t tEnv tState = runState (runReaderT (runExceptT t) tEnv) tState
 
@@ -189,7 +194,22 @@ mgu (TList u) (TList v) = mgu u v
 mgu (TRecord row1) (TRecord row2) = mgu row1 row2
 mgu (TVariant row1) (TVariant row2) = mgu row1 row2
 mgu TRowEmpty TRowEmpty = return nullSubst
-mgu row1@(TRowExtend label1 fieldTy1 rowTail1) row2@TRowExtend{} = do
+mgu row1@TRowExtend{} row2@TRowEmpty = unifyRow row1 row2
+mgu row1@TRowEmpty row2@TRowExtend{} = unifyRow row2 row1
+mgu row1@TRowExtend{} row2@TRowExtend{} = unifyRow row1 row2
+mgu t1 t2 = throwError'
+    [ "Types do not unify:"
+    , ppPos (getAnn t1) <+> ":" <+> ppType t1
+    , ppPos (getAnn t2) <+> ":" <+> ppType t2
+    ]
+
+unifyRow :: Type -> Type -> TI Subst
+unifyRow row1@TRowExtend{} row2@TRowEmpty = throwError' $
+    [ ppPos (getAnn row1) <+> ": cannot insert the label(s)"
+      <+> hcat (L.intersperse comma (map text . M.keys . rowToMap $ row1))
+    , "into row introduced at" <+> ppPos (getAnn row2)
+    ]
+unifyRow row1@(TRowExtend label1 fieldTy1 rowTail1) row2@TRowExtend{} = do
   -- apply side-condition to ensure termination
   (fieldTy2, rowTail2, theta1) <- rewriteRow (getAnn row1) (getAnn row2) row2 label1
   case snd (toList rowTail1) >>= extractMetaTv of
@@ -200,11 +220,7 @@ mgu row1@(TRowExtend label1 fieldTy1 rowTail1) row2@TRowExtend{} = do
       let s = theta2 <> theta1
       theta3 <- mgu (apply s rowTail1) (apply s rowTail2)
       return $ theta3 <> s
-mgu t1 t2 = throwError $ show $ vcat
-    [ "Types do not unify:"
-    , ppPos (getAnn t1) <+> ":" <+> ppType t1
-    , ppPos (getAnn t2) <+> ":" <+> ppType t2
-    ]
+unifyRow t1 t2 = error $ "Assertion failed: " ++ show (t1, t2)
 
 -- | in order to unify two meta type variables, we must unify any constraints
 unifyConstraints :: Pos -> MetaTv -> MetaTv -> TI Subst
@@ -224,7 +240,7 @@ unifyConstraints pos u v
 
 varBind :: Pos -> MetaTv -> Type -> TI Subst
 varBind pos u t
-  | u `S.member` meta t = throwError $ show $ vcat
+  | u `S.member` meta t = throwError'
         [ "Occur check fails:"
         , ppPos pos        <+> ppType (TMetaVar u)
         , "occurs in"
@@ -236,7 +252,7 @@ varBind pos u t
             CStar c
                 | t `satisfies` metaConstraint u -> return $ u |-> t
                 | otherwise ->
-                         throwError $ show $ vcat
+                         throwError'
                              [ "The type:"
                              , ppPos (getAnn t) <+> ":" <+> ppType t
                              , "does not satisfy the constraint:"
@@ -364,7 +380,7 @@ checkSigma pos e sigma = do
     let esc_tvs = ftv (sigma : env_tys)
         bad_tvs = filter (`S.member` esc_tvs) skol_tvs
     unless (null bad_tvs) $
-         throwError $ show $ vcat $
+         throwError'
               [ ppPos pos <+> ": Type not polymorphic enough:"
               , parensList (map (text . tyvarName) bad_tvs)
               ]
@@ -410,12 +426,12 @@ subsCheck pos sigma1 sigma2 = do
     let esc_tvs = ftv [sigma1, sigma2]
         bad_tvs = filter (`S.member` esc_tvs) skol_tvs
     unless (null bad_tvs) $
-        throwError $ show $
-            vcat [ ppPos pos <+> ": Subsumption check failed:"
-                 , indent 2 (ppType sigma1)
-                 , text "is not as polymorphic as"
-                 , indent 2 (ppType sigma2)
-                 ]
+        throwError'
+            [ ppPos pos <+> ": Subsumption check failed:"
+            , indent 2 (ppType sigma1)
+            , text "is not as polymorphic as"
+            , indent 2 (ppType sigma2)
+            ]
 
 subsCheckRho :: Pos -> Sigma -> Rho -> TI ()
 subsCheckRho pos sigma1@(TForAll _ _) rho2 = do
@@ -592,5 +608,5 @@ tcPrim pos prim = annotate pos $ case prim of
     unOp tv   = TForAll [tv] $ TFun ty ty
       where ty = TVar tv
 
-typeCheck :: Exp -> TI Sigma
-typeCheck e = tcRho e Nothing >>= inferSigma (getAnn e)
+throwError' :: [Doc] -> TI a
+throwError' = throwError . show . vcat

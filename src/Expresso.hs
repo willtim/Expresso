@@ -29,6 +29,7 @@ module Expresso
   , dummyPos
   , eval
   , evalFile
+  , evalFile'
   , evalString
   , evalWithEnv
   , initTIState
@@ -39,6 +40,7 @@ module Expresso
   , typeOf
   , typeOfString
   , typeOfWithEnv
+  , validate
   ) where
 
 import Control.Monad ((>=>))
@@ -92,7 +94,20 @@ evalFile path = runExceptT $ do
     top <- ExceptT $ Parser.parse path <$> readFile path
     ExceptT $ eval top
 
--- | Parse an ezpression and evaluate it.
+-- | Evaluate the contents of the supplied file path; and validate
+-- using the supplied type (schema).
+evalFile' :: HasValue a => Type -> FilePath -> IO (Either String a)
+evalFile' ty path = runExceptT $ do
+    top <- ExceptT $ Parser.parse path <$> readFile path
+    ExceptT $ eval (validate ty top)
+
+-- | Add a validating type signature section to the supplied expression.
+validate :: Type -> ExpI -> ExpI
+validate ty e = Parser.mkApp pos (Parser.mkSigSection pos ty) [e]
+  where
+    pos = dummyPos
+
+-- | Parse an expression and evaluate it.
 evalString :: HasValue a => String -> IO (Either String a)
 evalString str = runExceptT $ do
     top <- ExceptT $ return $ Parser.parse "<unknown>" str
