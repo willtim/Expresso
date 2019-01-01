@@ -14,23 +14,24 @@
 -- This module is the public API for Expresso.
 --
 module Expresso
-  ( ExpF(..)
-  , Bind(..)
-  , Import(..)
-  , ExpI
+  ( Bind(..)
+  , Env(..)
   , Exp
-  , Env
+  , ExpF(..)
+  , ExpI
   , HasValue(..)
-  , Value(..)
+  , Import(..)
   , Name
-  , TypeEnv(..)
+  , Thunk(..)
   , TIState
+  , TypeEnv(..)
+  , Value(..)
   , bind
   , dummyPos
-  , eval
   , evalFile
   , evalFile'
   , evalString
+  , evalString'
   , evalWithEnv
   , initTIState
   , runEvalM
@@ -41,12 +42,15 @@ module Expresso
   , typeOfString
   , typeOfWithEnv
   , validate
+  , Eval.mkStrictLam
+  , Eval.mkStrictLam2
+  , Eval.mkStrictLam3
   ) where
 
 import Control.Monad ((>=>))
 import Control.Monad.Except (ExceptT(..), runExceptT, throwError)
 
-import Expresso.Eval (Env, EvalM, HasValue(..), Value(..), runEvalM)
+import Expresso.Eval (Env, EvalM, HasValue(..), Thunk(..), Value(..), runEvalM)
 import Expresso.TypeCheck (TIState, initTIState)
 import Expresso.Pretty (render)
 import Expresso.Syntax
@@ -84,34 +88,39 @@ evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
   _sigma <- ExceptT . return $ inferTypes tEnv tState e
   ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e
 
--- | Evaluate an expression.
-eval :: HasValue a => ExpI -> IO (Either String a)
-eval = evalWithEnv (mempty, initTIState, mempty)
+-- | Evaluate the contents of the supplied file path; and optionally
+-- validate using a supplied type (schema).
+evalFile :: HasValue a => Maybe Type -> FilePath -> IO (Either String a)
+evalFile = evalFile' mempty mempty
 
--- | Evaluate the contents of the supplied file path.
-evalFile :: HasValue a => FilePath -> IO (Either String a)
-evalFile path = runExceptT $ do
+-- | Evaluate the contents of the supplied file path; and optionally
+-- validate using a supplied type (schema).
+-- NOTE: This version also takes a term environment and a type environment
+-- so that foreign functions and their types can be installed respectively.
+evalFile' :: HasValue a =>  Env -> TypeEnv -> Maybe Type -> FilePath -> IO (Either String a)
+evalFile' env tEnv mty path = runExceptT $ do
     top <- ExceptT $ Parser.parse path <$> readFile path
-    ExceptT $ eval top
+    ExceptT $ evalWithEnv (tEnv, initTIState, env) (maybe id validate mty $ top)
 
--- | Evaluate the contents of the supplied file path; and validate
--- using the supplied type (schema).
-evalFile' :: HasValue a => Type -> FilePath -> IO (Either String a)
-evalFile' ty path = runExceptT $ do
-    top <- ExceptT $ Parser.parse path <$> readFile path
-    ExceptT $ eval (validate ty top)
+-- | Parse an expression and evaluate it; optionally
+-- validate using a supplied type (schema).
+evalString :: HasValue a => Maybe Type -> String -> IO (Either String a)
+evalString = evalString' mempty mempty
+
+-- | Parse an expression and evaluate it; optionally
+-- validate using a supplied type (schema).
+-- NOTE: This version also takes a term environment and a type environment
+-- so that foreign functions and their types can be installed respectively.
+evalString' :: HasValue a => Env -> TypeEnv -> Maybe Type -> String -> IO (Either String a)
+evalString' env tEnv mty str = runExceptT $ do
+    top <- ExceptT $ return $ Parser.parse "<unknown>" str
+    ExceptT $ evalWithEnv (tEnv, initTIState, env) (maybe id validate mty $ top)
 
 -- | Add a validating type signature section to the supplied expression.
 validate :: Type -> ExpI -> ExpI
 validate ty e = Parser.mkApp pos (Parser.mkSigSection pos ty) [e]
   where
     pos = dummyPos
-
--- | Parse an expression and evaluate it.
-evalString :: HasValue a => String -> IO (Either String a)
-evalString str = runExceptT $ do
-    top <- ExceptT $ return $ Parser.parse "<unknown>" str
-    ExceptT $ eval top
 
 -- | Used by the REPL to bind variables.
 bind

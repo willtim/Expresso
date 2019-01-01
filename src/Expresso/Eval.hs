@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE RankNTypes #-}
@@ -23,14 +24,17 @@
 module Expresso.Eval(
     eval
   , runEvalM
-  , Env
+  , Env(..)
   , EvalM
   , HasValue(..)
+  , Thunk(..)
   , Value(..)
   , ppValue
   , ppValue'
-  , force
   , mkThunk
+  , mkStrictLam
+  , mkStrictLam2
+  , mkStrictLam3
   , bind
 )
 where
@@ -52,10 +56,11 @@ import Expresso.Utils (cata, (:*:)(..), K(..))
 
 -- | A call-by-need environment.
 -- Using a HashMap makes it easy to support record wildcards.
-type Env = HashMap Name Thunk
+newtype Env = Env { unEnv :: HashMap Name Thunk } deriving (Semigroup, Monoid)
 
 type EvalM a = ExceptT String IO a
 
+-- | A potentially unevaluated value.
 newtype Thunk = Thunk { force :: EvalM Value }
 
 instance Show Thunk where
@@ -275,11 +280,10 @@ evalPrim pos p = case p of
     Absurd -> VLam $ \v -> force v >> throwError "The impossible happened!"
     p -> error $ show pos ++ " : Unsupported Prim: " ++ show p
 
-
 -- non-strict bind
 bind :: Env -> Bind Name -> Thunk -> EvalM Env
 bind env b t = case b of
-    Arg n -> return $ HashMap.insert n t env
+    Arg n -> return $ insertEnv n t env
     _     -> bind' env b t
 
 -- strict bind
@@ -288,15 +292,24 @@ bind' env b t = do
   v <- force t
   case (b, v) of
     (Arg n, _)               ->
-        return $ HashMap.insert n (Thunk $ return v) env
+        return $ insertEnv n (Thunk $ return v) env
     (RecArg ns, VRecord m) | Just vs <- mapM (\n -> HashMap.lookup n m) ns ->
-        return $ env <> (HashMap.fromList $ zip ns vs)
+        return $ env <> (mkEnv $ zip ns vs)
     (RecWildcard, VRecord m) ->
-        return $ env <> m
+        return $ env <> Env m
     _ -> throwError $ "Cannot bind the pair: " ++ show b ++ " = " ++ show (ppValue v)
 
+insertEnv :: Name -> Thunk -> Env -> Env
+insertEnv n t (Env m) = Env $ HashMap.insert n t m
+
+lookupEnv :: Name -> Env -> Maybe Thunk
+lookupEnv n (Env m) = HashMap.lookup n m
+
+mkEnv :: [(Name, Thunk)] -> Env
+mkEnv = Env . HashMap.fromList
+
 lookupValue :: Env -> Name -> EvalM Thunk
-lookupValue env n = maybe err return $ HashMap.lookup n env
+lookupValue env n = maybe err return $ lookupEnv n env
   where
     err = throwError $ "Not found: " ++ show n
 
@@ -304,11 +317,18 @@ failOnValues :: Pos -> [Value] -> EvalM a
 failOnValues pos vs = throwError $ show pos ++ " : Unexpected value(s) : " ++
                                    show (parensList (map ppValue vs))
 
+-- | Make a strict Expresso lambda value (forced arguments) from a
+-- Haskell lambda.
 mkStrictLam :: (Value -> EvalM Value) -> Value
 mkStrictLam f = VLam $ \x -> force x >>= f
 
+-- | As mkStrictLam, but accepts Haskell functions with two curried arguments.
 mkStrictLam2 :: (Value -> Value -> EvalM Value) -> Value
 mkStrictLam2 f = mkStrictLam $ \v -> return $ mkStrictLam $ f v
+
+-- | As mkStrictLam, but accepts Haskell functions with three curried arguments.
+mkStrictLam3 :: (Value -> Value -> Value -> EvalM Value) -> Value
+mkStrictLam3 f = mkStrictLam $ \v -> return $ mkStrictLam2 $ f v
 
 proj' :: HasValue a => Thunk -> EvalM a
 proj' = force >=> proj

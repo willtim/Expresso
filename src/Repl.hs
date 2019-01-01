@@ -50,7 +50,7 @@ data Command
   | ChangeCWD FilePath
   | BeginMulti
   | Reset
-  | Env
+  | DumpEnv
   | Quit
   | Help
 
@@ -140,7 +140,7 @@ doCommand c = case c of
   Quit           -> lift $ modify (setMode Quitting)
   BeginMulti     -> lift $ modify (setMode MultiLine)
   Reset          -> doReset
-  Env            -> doDumpEnv
+  DumpEnv        -> doDumpEnv
   Help           -> mapM_ spew
     [ "REPL commands available from the prompt:"
     , ""
@@ -210,7 +210,7 @@ pCommand = Command <$> (reservedOp ":" *> p)
      <|> (reserved "type"  <|> reserved "t") *> (Type      <$> pExp)
      <|> reserved "cd"                       *> (ChangeCWD <$> pFilePath)
      <|> (reserved "reset" <|> reserved "r") *> pure Reset
-     <|> (reserved "env"   <|> reserved "e") *> pure Env
+     <|> (reserved "env"   <|> reserved "e") *> pure DumpEnv
      <|> (reserved "quit"  <|> reserved "q") *> pure Quit
      <|> (reserved "help"
           <|> reserved "h" <|> reserved "?") *> pure Help

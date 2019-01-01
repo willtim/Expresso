@@ -145,7 +145,7 @@ lazyTests = testGroup
 
 hasValue :: (Eq a, Show a, HasValue a) => String -> a -> TestTree
 hasValue str expected = testCase str $ do
-    result <- evalString str
+    result <- evalString Nothing str
     case result of
         Left err     -> assertFailure err
         Right actual -> assertEqual "" expected actual

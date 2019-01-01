@@ -1,13 +1,24 @@
 Name:            expresso
 Version:         0.1
 Cabal-Version:   >= 1.8
-License:         BSD3 
+License:         BSD3
 License-File:    LICENSE
 Author:          Tim Williams
 Maintainer:      info@timphilipwilliams.com
 Stability:       Experimental
 Synopsis:        A simple expressions language based on row types
+Category:        Configuration
+Description:
+    Expresso is a minimal statically-typed functional programming language, designed with embedding and/or extensibility in mind.
+    .
+    Possible use cases for such a minimal language include configuration (à la Nix), data exchange (à la JSON) or even a starting point for a custom external DSL.
+    .
+    Please refer to the README in the source repository for more details.
 Build-Type:      Simple
+
+Source-Repository head
+  Type: git
+  Location: https://github.com/willtim/Expresso
 
 Library
   Hs-Source-Dirs:  src
@@ -41,7 +52,7 @@ Executable expresso
                    Expresso.Utils
                    Expresso
 
-  ghc-options: -O2 -threaded -rtsopts -Wall -fwarn-tabs -funbox-strict-fields
+  ghc-options: -threaded -rtsopts -Wall -fwarn-tabs -funbox-strict-fields
                -fno-warn-orphans
                -fno-warn-unused-do-bind
                -fno-warn-name-shadowing
