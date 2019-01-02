@@ -300,6 +300,8 @@ Turing equivalence is introduced via a single `fix` primitive, which can be easi
     λ> override r {| x := "baz" |}
     {override_ = <Lambda>, x = "baz", y = "bazbar"}
 
+Note that removing `fix` and Turing equivalence does not guarantee termination in practice. It is still possible to write exponential programs that will not terminate during the lifetime of the universe without recursion or fix.
+
 ## References
 
 Expresso is built upon many ideas described in the following publications:
