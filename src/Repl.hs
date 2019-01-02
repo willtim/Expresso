@@ -23,7 +23,6 @@ import System.Console.Haskeline.MonadException ()
 import System.Directory
 import System.FilePath
 import Text.Parsec.String (Parser)
-import qualified Data.Map as M
 import qualified System.Console.Haskeline as HL
 import qualified Text.Parsec as P
 
@@ -41,7 +40,7 @@ data Mode = SingleLine | MultiLine | Quitting
 data ReplState = ReplState
   { stateMode    :: Mode
   , stateBuffer  :: [String]
-  , stateEnv     :: (TypeEnv, TIState, Env)
+  , stateEnv     :: Environments
   }
 
 data Command
@@ -124,7 +123,7 @@ emptyReplState :: ReplState
 emptyReplState = ReplState
   { stateMode   = SingleLine
   , stateBuffer = mempty
-  , stateEnv    = (mempty, initTIState, mempty)
+  , stateEnv    = initEnvironments
   }
 
 loadPrelude :: FilePath -> Repl ()
@@ -174,8 +173,8 @@ doDecl b e = do
 
 doTypeOf :: ExpI -> Repl ()
 doTypeOf e = do
-    (tEnv, tState, _) <- lift $ gets stateEnv
-    ms <- liftIO $ typeOfWithEnv tEnv tState e
+    envs <- lift $ gets stateEnv
+    ms   <- liftIO $ typeOfWithEnv envs e
     case ms of
       Left err    -> spew err
       Right sigma -> spew (showType sigma)
@@ -185,8 +184,8 @@ doReset = lift $ modify (setEnv $ stateEnv emptyReplState)
 
 doDumpEnv :: Repl ()
 doDumpEnv = do
-  (TypeEnv binds, _, _) <- lift $ gets stateEnv
-  forM_ (M.toList binds) $ \(name, sigma) ->
+  envs <- lift $ gets stateEnv
+  forM_ (dumpTypeEnv envs) $ \(name, sigma) ->
       spew $ name ++ " : " ++ showType sigma
 
 parseLine :: String -> Either String Line
@@ -222,7 +221,7 @@ pFilePath = stringLiteral -- TODO
 setMode :: Mode -> ReplState -> ReplState
 setMode m s = s { stateMode = m }
 
-setEnv :: (TypeEnv, TIState, Env) -> ReplState -> ReplState
+setEnv :: Environments -> ReplState -> ReplState
 setEnv envs s = s { stateEnv = envs }
 
 addToBuffer :: String -> ReplState -> ReplState

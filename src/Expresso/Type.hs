@@ -120,6 +120,12 @@ data StarHierarchy
 newtype TypeEnv = TypeEnv { unTypeEnv :: Map Name Sigma }
   deriving (Semigroup, Monoid)
 
+insertTypeEnv :: Name -> Sigma -> TypeEnv -> TypeEnv
+insertTypeEnv name ty (TypeEnv m) = TypeEnv $ M.insert name ty m
+
+typeEnvToList :: TypeEnv -> [(Name, Sigma)]
+typeEnvToList (TypeEnv m) = M.toList m
+
 instance View TypeF Type where
   proj    = left . unFix
   inj  e  = Fix (e :*: K dummyPos)

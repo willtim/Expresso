@@ -7,6 +7,7 @@
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 -- |
 -- Module      : Expresso.Eval
@@ -22,20 +23,21 @@
 -- The front-end syntax is simple, so we evaluate it directly.
 --
 module Expresso.Eval(
-    eval
-  , runEvalM
-  , Env(..)
+    Env
   , EvalM
   , HasValue(..)
   , Thunk(..)
   , Value(..)
-  , ppValue
-  , ppValue'
-  , mkThunk
+  , bind
+  , eval
+  , insertEnv
   , mkStrictLam
   , mkStrictLam2
   , mkStrictLam3
-  , bind
+  , mkThunk
+  , ppValue
+  , ppValue'
+  , runEvalM
 )
 where
 

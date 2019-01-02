@@ -1,4 +1,5 @@
 {-# LANGUAGE TupleSections #-}
+{-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 -- |
 -- Module      : Expresso
@@ -15,7 +16,8 @@
 --
 module Expresso
   ( Bind(..)
-  , Env(..)
+  , Env
+  , Environments
   , Exp
   , ExpF(..)
   , ExpI
@@ -24,7 +26,7 @@ module Expresso
   , Name
   , Thunk(..)
   , TIState
-  , TypeEnv(..)
+  , TypeEnv
   , Value(..)
   , bind
   , dummyPos
@@ -33,11 +35,13 @@ module Expresso
   , evalString
   , evalString'
   , evalWithEnv
-  , initTIState
+  , initEnvironments
+  , installBinding
   , runEvalM
   , showType
   , showValue
   , showValue'
+  , dumpTypeEnv
   , typeOf
   , typeOfString
   , typeOfWithEnv
@@ -50,7 +54,7 @@ module Expresso
 import Control.Monad ((>=>))
 import Control.Monad.Except (ExceptT(..), runExceptT, throwError)
 
-import Expresso.Eval (Env, EvalM, HasValue(..), Thunk(..), Value(..), runEvalM)
+import Expresso.Eval (Env, EvalM, HasValue(..), Thunk(..), Value(..), insertEnv, runEvalM)
 import Expresso.TypeCheck (TIState, initTIState)
 import Expresso.Pretty (render)
 import Expresso.Syntax
@@ -60,16 +64,34 @@ import qualified Expresso.Eval as Eval
 import qualified Expresso.TypeCheck as TypeCheck
 import qualified Expresso.Parser as Parser
 
+-- | Type and term environments.
+data Environments = Environments
+    { envsTypeEnv :: !TypeEnv
+    , envsTIState :: !TIState
+    , envsTermEnv :: !Env
+    }
+
+-- | Empty initial type and term environments.
+initEnvironments :: Environments
+initEnvironments = Environments mempty initTIState mempty
+
+-- | Install a binding using the supplied name, type and term.
+-- Useful for extending the set of built-in functions.
+installBinding :: Name -> Type -> Value -> Environments -> Environments
+installBinding name ty val envs =
+    envs { envsTypeEnv = insertTypeEnv name ty (envsTypeEnv envs)
+         , envsTermEnv = insertEnv name (Thunk . return $ val) (envsTermEnv envs)
+         }
 
 -- | Query the type of an expression using the supplied type environment.
-typeOfWithEnv :: TypeEnv -> TIState -> ExpI -> IO (Either String Type)
-typeOfWithEnv tEnv tState ei = runExceptT $ do
+typeOfWithEnv :: Environments -> ExpI -> IO (Either String Type)
+typeOfWithEnv (Environments tEnv tState _) ei = runExceptT $ do
     e <- Parser.resolveImports ei
     ExceptT $ return $ inferTypes tEnv tState e
 
 -- | Query the type of an expression.
 typeOf :: ExpI -> IO (Either String Type)
-typeOf = typeOfWithEnv mempty initTIState
+typeOf = typeOfWithEnv initEnvironments
 
 -- | Parse an expression and query its type.
 typeOfString :: String -> IO (Either String Type)
@@ -80,10 +102,10 @@ typeOfString str = runExceptT $ do
 -- | Evaluate an expression using the supplied type and term environments.
 evalWithEnv
     :: HasValue a
-    => (TypeEnv, TIState, Env)
+    => Environments
     -> ExpI
     -> IO (Either String a)
-evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
+evalWithEnv (Environments tEnv tState env) ei = runExceptT $ do
   e      <- Parser.resolveImports ei
   _sigma <- ExceptT . return $ inferTypes tEnv tState e
   ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e
@@ -91,30 +113,30 @@ evalWithEnv (tEnv, tState, env) ei = runExceptT $ do
 -- | Evaluate the contents of the supplied file path; and optionally
 -- validate using a supplied type (schema).
 evalFile :: HasValue a => Maybe Type -> FilePath -> IO (Either String a)
-evalFile = evalFile' mempty mempty
+evalFile = evalFile' initEnvironments
 
 -- | Evaluate the contents of the supplied file path; and optionally
 -- validate using a supplied type (schema).
 -- NOTE: This version also takes a term environment and a type environment
 -- so that foreign functions and their types can be installed respectively.
-evalFile' :: HasValue a =>  Env -> TypeEnv -> Maybe Type -> FilePath -> IO (Either String a)
-evalFile' env tEnv mty path = runExceptT $ do
+evalFile' :: HasValue a => Environments -> Maybe Type -> FilePath -> IO (Either String a)
+evalFile' envs mty path = runExceptT $ do
     top <- ExceptT $ Parser.parse path <$> readFile path
-    ExceptT $ evalWithEnv (tEnv, initTIState, env) (maybe id validate mty $ top)
+    ExceptT $ evalWithEnv envs (maybe id validate mty $ top)
 
 -- | Parse an expression and evaluate it; optionally
 -- validate using a supplied type (schema).
 evalString :: HasValue a => Maybe Type -> String -> IO (Either String a)
-evalString = evalString' mempty mempty
+evalString = evalString' initEnvironments
 
 -- | Parse an expression and evaluate it; optionally
 -- validate using a supplied type (schema).
 -- NOTE: This version also takes a term environment and a type environment
 -- so that foreign functions and their types can be installed respectively.
-evalString' :: HasValue a => Env -> TypeEnv -> Maybe Type -> String -> IO (Either String a)
-evalString' env tEnv mty str = runExceptT $ do
+evalString' :: HasValue a => Environments -> Maybe Type -> String -> IO (Either String a)
+evalString' envs mty str = runExceptT $ do
     top <- ExceptT $ return $ Parser.parse "<unknown>" str
-    ExceptT $ evalWithEnv (tEnv, initTIState, env) (maybe id validate mty $ top)
+    ExceptT $ evalWithEnv envs (maybe id validate mty $ top)
 
 -- | Add a validating type signature section to the supplied expression.
 validate :: Type -> ExpI -> ExpI
@@ -124,11 +146,11 @@ validate ty e = Parser.mkApp pos (Parser.mkSigSection pos ty) [e]
 
 -- | Used by the REPL to bind variables.
 bind
-    :: (TypeEnv, TIState, Env)
+    :: Environments
     -> Bind Name
     -> ExpI
-    -> EvalM (TypeEnv, TIState, Env)
-bind (tEnv, tState, env) b ei = do
+    -> EvalM Environments
+bind (Environments tEnv tState env) b ei = do
     e     <- Parser.resolveImports ei
     let (res'e, tState') =
             TypeCheck.runTI (TypeCheck.tcDecl (getAnn ei) b e) tEnv tState
@@ -137,7 +159,7 @@ bind (tEnv, tState, env) b ei = do
         Right tEnv' -> do
             thunk <- Eval.mkThunk $ Eval.eval env e
             env'  <- Eval.bind env b thunk
-            return (tEnv', tState', env')
+            return $ Environments tEnv' tState' env'
 
 -- | Pretty print the supplied type.
 showType :: Type -> String
@@ -150,6 +172,10 @@ showValue = render . Eval.ppValue
 -- | Pretty print the supplied value. This evaluates deeply.
 showValue' :: Value -> IO String
 showValue' v = either id render <$> (runEvalM $ Eval.ppValue' v)
+
+-- | Extract type environment bindings.
+dumpTypeEnv :: Environments -> [(Name, Sigma)]
+dumpTypeEnv = typeEnvToList . envsTypeEnv
 
 inferTypes :: TypeEnv -> TIState -> Exp -> Either String Type
 inferTypes tEnv tState e =
