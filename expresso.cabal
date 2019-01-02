@@ -1,6 +1,6 @@
 Name:            expresso
-Version:         0.1
-Cabal-Version:   >= 1.8
+Version:         0.1.0.0
+Cabal-Version:   >= 1.10
 License:         BSD3
 License-File:    LICENSE
 Author:          Tim Williams
@@ -13,44 +13,61 @@ Description:
     .
     Possible use cases for such a minimal language include configuration (à la Nix), data exchange (à la JSON) or even a starting point for a custom external DSL.
     .
-    Please refer to the README in the source repository for more details.
+    Please refer to README.md for more information.
 Build-Type:      Simple
+Bug-Reports:     https://github.com/willtim/Expresso/issues
+Extra-Source-Files:
+    Prelude.x
+    CHANGELOG.md
+    README.md
 
 Source-Repository head
   Type: git
   Location: https://github.com/willtim/Expresso
 
 Library
-  Hs-Source-Dirs:  src
-  Build-Depends:   base, containers, hashable, mtl, parsec, wl-pprint, text,
-                   unordered-containers, haskeline, directory, filepath
-  Exposed-Modules: Expresso
-  Other-Modules:   Expresso.Parser
-                   Expresso.Eval
-                   Expresso.Type
-                   Expresso.TypeCheck
-                   Expresso.Syntax
-                   Expresso.Pretty
-                   Expresso.Utils
-  ghc-options:     -Wall -fwarn-tabs -funbox-strict-fields
-                   -fno-warn-orphans
-                   -fno-warn-unused-do-bind
-                   -fno-warn-name-shadowing
-                   -fno-warn-missing-pattern-synonym-signatures
+  Hs-Source-Dirs:   src
+  Default-Language: Haskell2010
+  Build-Depends:    base                 >= 4.11.1 && < 4.12,
+                    containers           >= 0.5.11 && < 0.6,
+                    directory            >= 1.3.1 && < 1.4,
+                    filepath             >= 1.4.2 && < 1.5,
+                    hashable             >= 1.2.7 && < 1.3,
+                    text                 >= 1.2.3 && < 1.3,
+                    haskeline            >= 0.7.4 && < 0.8,
+                    mtl                  >= 2.2.2 && < 2.3,
+                    parsec               >= 3.1.13 && < 3.2,
+                    unordered-containers >= 0.2.9 && < 0.3,
+                    wl-pprint            >= 1.2.1 && < 1.3
+  Exposed-Modules:  Expresso
+  Other-Modules:    Expresso.Parser
+                    Expresso.Eval
+                    Expresso.Type
+                    Expresso.TypeCheck
+                    Expresso.Syntax
+                    Expresso.Pretty
+                    Expresso.Utils
+  ghc-options:      -Wall -fwarn-tabs -funbox-strict-fields
+                    -fno-warn-orphans
+                    -fno-warn-unused-do-bind
+                    -fno-warn-name-shadowing
+                    -fno-warn-missing-pattern-synonym-signatures
 
 Executable expresso
-  Main-Is:         Repl.hs
-  Hs-Source-Dirs:  src
-  Build-Depends:   base, containers, hashable, mtl, parsec, wl-pprint, text,
-                   unordered-containers, haskeline, directory, filepath
-  Other-Modules:   Expresso.Parser
-                   Expresso.Eval
-                   Expresso.Type
-                   Expresso.TypeCheck
-                   Expresso.Syntax
-                   Expresso.Pretty
-                   Expresso.Utils
-                   Expresso
+  Main-Is:          Repl.hs
+  Hs-Source-Dirs:   src
+  Default-Language: Haskell2010
+
+  Build-Depends:    base, containers, hashable, mtl, parsec, wl-pprint, text,
+                    unordered-containers, haskeline, directory, filepath
+  Other-Modules:    Expresso.Parser
+                    Expresso.Eval
+                    Expresso.Type
+                    Expresso.TypeCheck
+                    Expresso.Syntax
+                    Expresso.Pretty
+                    Expresso.Utils
+                    Expresso
 
   ghc-options: -threaded -rtsopts -Wall -fwarn-tabs -funbox-strict-fields
                -fno-warn-orphans
@@ -59,17 +76,19 @@ Executable expresso
                -fno-warn-missing-pattern-synonym-signatures
 
 Test-Suite test-expresso
-  Type:            exitcode-stdio-1.0
-  Main-Is:         Tests.hs
-  Hs-Source-Dirs:  src
-  Build-Depends:   base, containers, hashable, mtl, parsec, wl-pprint, text,
-                   unordered-containers, haskeline, directory, filepath,
-                   expresso, tasty, tasty-hunit
-  Other-Modules:   Expresso
-                   Expresso.Eval
-                   Expresso.Parser
-                   Expresso.Pretty
-                   Expresso.Syntax
-                   Expresso.Type
-                   Expresso.TypeCheck
-                   Expresso.Utils
+  Type:             exitcode-stdio-1.0
+  Main-Is:          Tests.hs
+  Hs-Source-Dirs:   src
+  Default-Language: Haskell2010
+
+  Build-Depends:    base, containers, hashable, mtl, parsec, wl-pprint, text,
+                    unordered-containers, haskeline, directory, filepath,
+                    expresso, tasty, tasty-hunit
+  Other-Modules:    Expresso
+                    Expresso.Eval
+                    Expresso.Parser
+                    Expresso.Pretty
+                    Expresso.Syntax
+                    Expresso.Type
+                    Expresso.TypeCheck
+                    Expresso.Utils
