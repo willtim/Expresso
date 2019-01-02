@@ -4,17 +4,13 @@
 }:
 mkDerivation {
   pname = "expresso";
-  version = "0.1";
+  version = "0.1.1.0";
   src = ./.;
   isLibrary = true;
   isExecutable = true;
   libraryHaskellDepends = [
-    base containers directory filepath hashable haskeline mtl parsec
-    text unordered-containers wl-pprint
-  ];
-  executableHaskellDepends = [
-    base containers directory filepath hashable haskeline mtl parsec
-    text unordered-containers wl-pprint
+    base containers directory filepath hashable mtl parsec text
+    unordered-containers wl-pprint
   ];
   testHaskellDepends = [
     base containers directory filepath hashable haskeline mtl parsec
