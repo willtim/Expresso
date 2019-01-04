@@ -2,7 +2,7 @@
 {-# LANGUAGE QuasiQuotes #-}
 
 -- |
--- Module      : Expresso.TH.Type
+-- Module      : Expresso.TH.QQ
 -- Copyright   : (c) Tim Williams 2017-2019
 -- License     : BSD3
 --
@@ -12,7 +12,7 @@
 --
 -- Quasi-quoters for defining Expresso types in Haskell.
 --
-module Expresso.TH.QQ where
+module Expresso.TH.QQ (expressoType) where
 
 import Control.Exception
 
@@ -38,7 +38,7 @@ def = QuasiQuoter
     }
   where
     failure kind =
-        fail $ "This quasiquoter does not support splicing " ++ kind
+        fail $ "This quasi-quoter does not support splicing " ++ kind
 
 genTypeDecl :: String -> ExpQ
 genTypeDecl str = do

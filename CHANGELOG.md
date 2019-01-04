@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.1.1.0
+
+- API convenience functions for building record/variant HasValue instances.
+- HasValue instances for function types.
+- added Type constructors and pattern synonyms to API
+- terminfo as an explicit dependency.
+
 ## 0.1.0.2
 
 Expresso REPL fails to build on Hackage, disable building for now.

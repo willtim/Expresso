@@ -302,6 +302,122 @@ Turing equivalence is introduced via a single `fix` primitive, which can be easi
 
 Note that removing `fix` and Turing equivalence does not guarantee termination in practice. It is still possible to write exponential programs that will not terminate during the lifetime of the universe without recursion or fix.
 
+## A configuration file format
+
+Expresso can be used as a typed configuration file format from within Haskell programs. As an example, let's consider a hypothetical small config file for a backup program:
+
+    let awsTemplate =
+        { location ="s3://s3-eu-west-2.amazonaws.com/atavachron-backup"
+        , include  = []
+        , exclude  = []
+        }
+    in
+    { cachePath   = Default{}
+    , taskThreads = Override 2
+    , profiles =
+       [ { name = "pictures", source = "~/Pictures" | awsTemplate }
+       , { name = "music", source = "~/Music", exclude := ["**/*.m4a"] | awsTemplate }
+       ]
+    }
+
+Note that even for such a small example, we can already leverage some of the abstraction power of extensible records to avoid repetition in the config file.
+
+In order to consume this file from a Haskell program, we can define some corresponding nominal data types:
+
+    data Config = Config
+        { configCachePath   :: Overridable Text
+        , configTaskThreads :: Overridable Integer
+        , configProfiles    :: [Profile]
+        } deriving Show
+
+    data Overridable a = Default | Override a deriving Show
+
+    data Profile = Profile
+        { profileName     :: Text
+        , profileLocation :: Text
+        , profileInclude  :: [Text]
+        , profileExclude  :: [Text]
+        , profileSource   :: Text
+        } deriving Show
+
+Using the Expresso API, we can write `HasValue` instances to handle the projection into and injection from, Haskell values:
+
+    import Expresso
+
+    instance HasValue Config where
+        proj v = Config
+            <$> v .: "cachePath"
+            <*> v .: "taskThreads"
+            <*> v .: "profiles"
+        inj Config{..} = mkRecord
+            [ "cachePath"      .= inj configCachePath
+            , "taskThreads"    .= inj configTaskThreads
+            , "profiles"       .= inj configProfiles
+            ]
+
+    instance HasValue a => HasValue (Overridable a) where
+        proj = choice [("Override", fmap Override . proj)
+                      ,("Default",  const $ pure Default)
+                      ]
+        inj (Override x) = mkVariant "Override" (inj x)
+        inj Default = mkVariant "Default" unit
+
+    instance HasValue Profile where
+        proj v = Profile
+            <$> v .: "name"
+            <*> v .: "location"
+            <*> v .: "include"
+            <*> v .: "exclude"
+            <*> v .: "source"
+        inj Profile{..} = mkRecord
+            [ "name"     .= inj profileName
+            , "location" .= inj profileLocation
+            , "include"  .= inj profileInclude
+            , "exclude"  .= inj profileExclude
+            , "source"   .= inj profileSource
+            ]
+
+Before we load the config file, we will probably want to check the inferred types against an agreed signature (a.k.a. schema validation). The Expresso API provides a Template Haskell quasi-quoter to make this convenient from within Haskell:
+
+    import Expresso.TH.QQ
+
+    schema :: Type
+    schema =
+      [expressoType|
+        { cachePath   : <Default : {}, Override : Text>
+        , taskThreads : <Default : {}, Override : Int>
+        , profiles :
+            [ { name     : Text
+              , location : Text
+              , include  : [Text]
+              , exclude  : [Text]
+              , source   : Text
+              }
+            ]
+        }|]
+
+We can thus load, validate and evaluate the above config file using the following code:
+
+    loadConfig :: FilePath -> IO (Either String Config)
+    loadConfig = evalFile (Just schema)
+
+Note that we can also install our own custom values/functions for users to reference in their config files. For example:
+
+    loadConfig :: FilePath -> IO (Either String Config)
+    loadConfig = evalFile' envs (Just schema)
+      where
+        envs = installBinding "system" TText (inj System.Info.os)
+             . installBinding "takeFileName"  (TFun TText TText) (inj takeFileName)
+             . installBinding "takeDirectory" (TFun TText TText) (inj takeDirectory)
+             . installBinding "doesPathExist" (TFun TText TBool) (inj doesPathExist) -- NB: This does IO reads
+             $ initEnvironments
+
+Finally, we need not limit ourselves to config files that specify record values. We can project Expresso function values into Haskell functions (in IO), allowing higher-order config files! The projection itself is handled by the `HasValue` class, just like any other value:
+
+     Haskell> Right (f :: Integer -> IO Integer) <- evalString (Just $ TFun TInt TInt) "x -> x + 1"
+     Haskell> f 1
+     2
+
 ## References
 
 Expresso is built upon many ideas described in the following publications:

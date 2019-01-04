@@ -1,4 +1,5 @@
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE PatternSynonyms #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
 
 -- |
@@ -26,6 +27,22 @@ module Expresso
   , Name
   , Thunk(..)
   , TIState
+  , Type
+  , pattern TForAll
+  , pattern TVar
+  , pattern TMetaVar
+  , pattern TInt
+  , pattern TDbl
+  , pattern TBool
+  , pattern TChar
+  , pattern TText
+  , pattern TFun
+  , pattern TList
+  , pattern TRecord
+  , pattern TVariant
+  , pattern TRowEmpty
+  , pattern TRowExtend
+  , TypeF(..)
   , TypeEnv
   , Value(..)
   , bind
@@ -46,9 +63,16 @@ module Expresso
   , typeOfString
   , typeOfWithEnv
   , validate
+  , Eval.choice
+  , Eval.mkRecord
   , Eval.mkStrictLam
   , Eval.mkStrictLam2
   , Eval.mkStrictLam3
+  , Eval.mkVariant
+  , Eval.typeMismatch
+  , Eval.unit
+  , (Eval..:)
+  , (Eval..=)
   ) where
 
 import Control.Monad ((>=>))

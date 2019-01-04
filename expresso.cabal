@@ -1,5 +1,5 @@
 Name:            expresso
-Version:         0.1.0.2
+Version:         0.1.1.0
 Cabal-Version:   >= 1.10
 License:         BSD3
 License-File:    LICENSE
@@ -25,6 +25,11 @@ Source-Repository head
   Type: git
   Location: https://github.com/willtim/Expresso
 
+Flag terminfo
+  Description: On POSIX systems, build with the terminfo lib for detecting terminal width.
+  Manual: False
+  Default: True
+
 Library
   Hs-Source-Dirs:   src
   Default-Language: Haskell2010
@@ -34,12 +39,17 @@ Library
                     filepath             >= 1.4.2 && < 1.5,
                     hashable             >= 1.2.7 && < 1.3,
                     text                 >= 1.2.3 && < 1.3,
- --                   haskeline            >= 0.7.4 && < 0.8,
+                    haskeline            >= 0.7.4 && < 0.8,
                     mtl                  >= 2.2.2 && < 2.3,
                     parsec               >= 3.1.13 && < 3.2,
+                    template-haskell     >= 2.13.0 && < 2.15,
                     unordered-containers >= 0.2.9 && < 0.3,
                     wl-pprint            >= 1.2.1 && < 1.3
+  if (!(os(windows))) && (flag(terminfo))
+    Build-Depends:  terminfo             >= 0.4 && < 0.5
+
   Exposed-Modules:  Expresso
+                    Expresso.TH.QQ
   Other-Modules:    Expresso.Parser
                     Expresso.Eval
                     Expresso.Type
@@ -47,6 +57,7 @@ Library
                     Expresso.Syntax
                     Expresso.Pretty
                     Expresso.Utils
+
   ghc-options:      -Wall -fwarn-tabs -funbox-strict-fields
                     -fno-warn-orphans
                     -fno-warn-unused-do-bind
@@ -57,9 +68,11 @@ Executable expresso
   Main-Is:          Repl.hs
   Hs-Source-Dirs:   src
   Default-Language: Haskell2010
-  Buildable:        False
   Build-Depends:    base, containers, hashable, mtl, parsec, wl-pprint, text,
                     unordered-containers, haskeline, directory, filepath
+  if (!(os(windows))) && (flag(terminfo))
+    Build-Depends:  terminfo
+
   Other-Modules:    Expresso.Parser
                     Expresso.Eval
                     Expresso.Type
@@ -84,6 +97,9 @@ Test-Suite test-expresso
   Build-Depends:    base, containers, hashable, mtl, parsec, wl-pprint, text,
                     unordered-containers, haskeline, directory, filepath,
                     expresso, tasty, tasty-hunit
+  if (!(os(windows))) && (flag(terminfo))
+    Build-Depends:  terminfo
+
   Other-Modules:    Expresso
                     Expresso.Eval
                     Expresso.Parser

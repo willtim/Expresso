@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE RankNTypes #-}
@@ -29,15 +30,22 @@ module Expresso.Eval(
   , Thunk(..)
   , Value(..)
   , bind
+  , choice
   , eval
   , insertEnv
+  , mkRecord
   , mkStrictLam
   , mkStrictLam2
   , mkStrictLam3
   , mkThunk
+  , mkVariant
   , ppValue
   , ppValue'
   , runEvalM
+  , typeMismatch
+  , unit
+  , (.:)
+  , (.=)
 )
 where
 
@@ -128,6 +136,10 @@ extractChar _ = Nothing
 -- | Run the EvalM evaluation computation.
 runEvalM :: EvalM a -> IO (Either String a)
 runEvalM = runExceptT
+
+-- | Partial variant of @runEvalM@.
+runEvalM' :: EvalM a -> IO a
+runEvalM' = fmap (either error id) . runExceptT
 
 eval :: Env -> Exp -> EvalM Value
 eval env e = cata alg e env
@@ -320,18 +332,19 @@ failOnValues pos vs = throwError $ show pos ++ " : Unexpected value(s) : " ++
                                    show (parensList (map ppValue vs))
 
 -- | Make a strict Expresso lambda value (forced arguments) from a
--- Haskell lambda.
+-- Haskell function (on Expresso values).
 mkStrictLam :: (Value -> EvalM Value) -> Value
 mkStrictLam f = VLam $ \x -> force x >>= f
 
--- | As mkStrictLam, but accepts Haskell functions with two curried arguments.
+-- | As @mkStrictLam@, but accepts Haskell functions with two curried arguments.
 mkStrictLam2 :: (Value -> Value -> EvalM Value) -> Value
 mkStrictLam2 f = mkStrictLam $ \v -> return $ mkStrictLam $ f v
 
--- | As mkStrictLam, but accepts Haskell functions with three curried arguments.
+-- | As @mkStrictLam@, but accepts Haskell functions with three curried arguments.
 mkStrictLam3 :: (Value -> Value -> Value -> EvalM Value) -> Value
 mkStrictLam3 f = mkStrictLam $ \v -> return $ mkStrictLam2 $ f v
 
+-- | Force (evaluate) thunk and then project out the Haskell value.
 proj' :: HasValue a => Thunk -> EvalM a
 proj' = force >=> proj
 
@@ -398,15 +411,11 @@ unpackChars pos v = failOnValues pos [v]
 ------------------------------------------------------------
 -- HasValue class and instances
 
--- TODO generic derivation a la GG
-
--- TODO write pure evaluator in ST, carry type in class to get rid of Either/Maybe to get
---    instance (HasValue b) => HasValue (a -> b) where
 instance (HasValue a, HasValue b) => HasValue (a -> EvalM b) where
     proj (VLam f) = return $ \x -> do
       r <- f (Thunk $ return $ inj x)
       proj r
-    proj v        = failProj "VLam" v
+    proj v        = typeMismatch "VLam" v
     inj f         = VLam $ \v -> proj' v >>= fmap inj . f
 
 -- | A class of Haskell types that can be projected from or injected
@@ -421,42 +430,54 @@ instance HasValue Value where
 
 instance HasValue Integer where
     proj (VInt i) = return i
-    proj v        = failProj "VInt" v
+    proj v        = typeMismatch "VInt" v
     inj           = VInt
 
 instance HasValue Double where
     proj (VDbl d) = return d
-    proj v        = failProj "VDbl" v
+    proj v        = typeMismatch "VDbl" v
     inj           = VDbl
 
 instance HasValue Bool where
     proj (VBool b) = return b
-    proj v         = failProj "VBool" v
+    proj v         = typeMismatch "VBool" v
     inj            = VBool
 
 instance HasValue Char where
     proj (VChar c) = return c
-    proj v         = failProj "VChar" v
+    proj v         = typeMismatch "VChar" v
     inj            = VChar
+
+instance HasValue String where
+    proj (VText s) = return $ T.unpack s
+    proj v         = typeMismatch "VText" v
+    inj            = VText . T.pack
 
 instance HasValue Text where
     proj (VText s) = return s
-    proj v         = failProj "VText" v
+    proj v         = typeMismatch "VText" v
     inj            = VText
+
+instance HasValue a => HasValue (Maybe a) where
+    proj = choice [ ("Just", fmap Just . proj)
+                  , ("Nothing", const $ pure Nothing)
+                  ]
+    inj  (Just x) = mkVariant "Just" (inj x)
+    inj  Nothing  = mkVariant "Nothing" unit
 
 instance {-# OVERLAPS #-} HasValue a => HasValue [a] where
     proj (VList xs) = mapM proj xs
-    proj v          = failProj "VList" v
+    proj v          = typeMismatch "VList" v
     inj             = VList . map inj
 
 instance {-# OVERLAPS #-} HasValue [Value] where
     proj (VList xs)  = return xs
-    proj v           = failProj "VList" v
+    proj v           = typeMismatch "VList" v
     inj              = VList
 
 instance HasValue a => HasValue (HashMap Name a) where
     proj (VRecord m) = mapM proj' m
-    proj v           = failProj "VRecord" v
+    proj v           = typeMismatch "VRecord" v
     inj              = VRecord . fmap (Thunk . return . inj)
 
 instance {-# OVERLAPS #-} HasValue a => HasValue [(Name, a)] where
@@ -465,13 +486,72 @@ instance {-# OVERLAPS #-} HasValue a => HasValue [(Name, a)] where
 
 instance {-# OVERLAPS #-} HasValue (HashMap Name Thunk) where
     proj (VRecord m) = return m
-    proj v           = failProj "VRecord" v
+    proj v           = typeMismatch "VRecord" v
     inj              = VRecord
 
 instance {-# OVERLAPS #-} HasValue [(Name, Thunk)] where
     proj v           = HashMap.toList <$> proj v
     inj              = inj . HashMap.fromList
 
-failProj :: String -> Value -> EvalM a
-failProj desc v = throwError $ "Expected a " ++ desc ++
+instance {-# OVERLAPS #-} (HasValue a, HasValue b) => HasValue (a -> b) where
+    proj _ = throwError "proj not supported for pure functions"
+    inj f  = mkStrictLam $ fmap (inj . f) . proj
+
+instance {-# OVERLAPS #-} (HasValue a, HasValue b, HasValue c) => HasValue (a -> b -> c) where
+    proj _ = throwError "proj not supported for pure functions"
+    inj f  = inj $ \x -> inj (f x)
+
+instance {-# OVERLAPS #-} (HasValue a, HasValue b, HasValue c, HasValue d) => HasValue (a -> b -> c -> d) where
+    proj _ = throwError "proj not supported for pure functions"
+    inj f  = inj $ \x -> inj (f x)
+
+instance {-# OVERLAPS #-} (HasValue a, HasValue b) => HasValue (a -> IO b) where
+    proj (VLam f) = return $ \x -> runEvalM' $ f (Thunk . return . inj $ x) >>= proj
+    proj v        = typeMismatch "VLam" v
+    inj f         = mkStrictLam $ \v -> proj v >>= \x -> inj <$> liftIO (f x)
+
+instance {-# OVERLAPS #-} (HasValue a, HasValue b, HasValue c) => HasValue (a -> b -> IO c) where
+    proj v = proj v >>= \f -> return $ \x -> f x
+    inj f  = inj $ \x -> inj (f x)
+
+instance {-# OVERLAPS #-} (HasValue a, HasValue b, HasValue c, HasValue d) => HasValue (a -> b -> c -> IO d) where
+    proj v = proj v >>= \f -> return $ \x -> f x
+    inj f  = inj $ \x -> inj (f x)
+
+-- | Throw a type mismatch error.
+typeMismatch :: String -> Value -> EvalM a
+typeMismatch expected v = throwError $ "Type mismatch: expected a " ++ expected ++
     ", but got: " ++ show (ppValue v)
+
+-- | Project out a record field, fail with a type mismatch if it is not present.
+(.:) :: HasValue a => Value -> Name -> EvalM a
+(.:) (VRecord m) k = case HashMap.lookup k m of
+    Nothing -> throwError $ "Record label " ++ show k ++ " not present"
+    Just v  -> proj' v
+(.:) v _ = typeMismatch "VRecord" v
+
+-- | Pair up a field name and a value. Intended to be used with @mkRecord@ or @mkVariant@.
+(.=) :: Name -> Value -> (Name, Thunk)
+(.=) k v = (k, Thunk . return $ v)
+
+-- | Convenience for implementing @proj@ for a sum type.
+choice :: HasValue a => [(Name, Value -> EvalM a)] -> Value -> EvalM a
+choice alts = \case
+    VVariant k v
+        | Just f <- HashMap.lookup k m -> force v >>= f
+        | otherwise -> throwError $ "Missing label in alternatives: " ++ show k
+    v -> typeMismatch "VVariant" v
+  where
+    m = HashMap.fromList alts
+
+-- | Convenience constructor for a record value.
+mkRecord :: [(Name, Thunk)] -> Value
+mkRecord = VRecord . HashMap.fromList
+
+-- | Convenience constructor for a variant value.
+mkVariant :: Name -> Value -> Value
+mkVariant name = VVariant name . Thunk . return
+
+-- | Unit value. Equivalent to @()@ in Haskell.
+unit :: Value
+unit = VRecord mempty
