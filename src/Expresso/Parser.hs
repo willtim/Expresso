@@ -148,6 +148,7 @@ opTable  = [ [ prefix "-" Neg
              ]
            , [ binary "++" ListAppend     P.AssocLeft
              , binary "::" ListCons       P.AssocRight
+             , binary "<>" TextAppend     P.AssocLeft
              ]
            , [ binary "==" Eq             P.AssocLeft
              , binary "/=" NEq            P.AssocLeft

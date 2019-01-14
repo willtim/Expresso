@@ -85,6 +85,7 @@ data Prim
   | BwdComp
   | Pack
   | Unpack
+  | TextAppend
   | ListEmpty
   | ListCons
   | ListNull    -- needed if list elems have no equality defined

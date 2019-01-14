@@ -256,6 +256,8 @@ evalPrim pos p = case p of
 
     Pack          -> mkStrictLam $ packChars pos
     Unpack        -> mkStrictLam $ unpackChars pos
+    TextAppend    -> VLam $ \xs -> return $ VLam $ \ys ->
+        VText <$> ((<>) <$> proj' xs <*> proj' ys)
 
     ListEmpty     -> VList []
     ListNull      -> VLam $ \xs ->

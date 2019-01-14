@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.1.1.1
+
+- added a text append primitive
+
 ## 0.1.1.0
 
 - API convenience functions for building record/variant HasValue instances.

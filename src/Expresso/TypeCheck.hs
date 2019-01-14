@@ -525,6 +525,7 @@ tcPrim pos prim = annotate pos $ case prim of
                                           (TFun (TVar a) (TVar c)))
   Pack                   -> TFun (TList TChar) TText
   Unpack                 -> TFun TText (TList TChar)
+  TextAppend             -> TFun TText (TFun TText TText)
   Cond                   ->
     let a = newTyVar CNone 'a'
     in TForAll [a] $ TFun TBool
