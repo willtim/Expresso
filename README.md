@@ -17,7 +17,7 @@ Expresso has the following features:
 - Convenient use from Haskell (a type class for marshalling values)
 - Haskell-inspired syntax
 - Type annotations to support first-class modules and schema validation use cases
-- Built-in support for ints, double, bools, chars, maybes and lists
+- Built-in support for ints, double, bools, chars and lists
 
 ## Installation
 
@@ -135,21 +135,21 @@ Or simply:
 Records with polymorphic functions can be passed as lambda arguments and remain polymorphic using *higher-rank polymorphism*. To accomplish this, we must provide Expresso with a suitable type annotation of the argument. For example:
 
     let f = (m : forall a. { reverse : [a] -> [a] |_}) ->
-                {l = m.reverse [True, False], r = m.reverse "abc" }
+                {l = m.reverse [True, False], r = m.reverse [1,2,3] }
 
 The function `f` above takes a "module" `m` containing a polymorphic function `reverse`. We annotate `m` with a type by using a single colon `:` followed by the type we are expecting.
 Note the underscore `_` in the tail of the record. This is a *type wildcard*, meaning we have specified a *partial type signature*. This type wildcard allows us to pass an arbitrary module containing a `reverse` function with this signature. To see the full type signature of `f`, we can use the Expresso REPL:
 
     λ> :t f
     forall r. (r\reverse) => (forall a. {reverse : [a] -> [a] | r}) ->
-        {l : [Bool], r : [Char]}
+        {l : [Bool], r : [Int]}
 
 Note that the `r`, representing the rest of the module fields, is a top-level quantifier. The type wildcard is especially useful here, as it allows us to avoid creating a top-level signature for the entire function and explicitly naming this row variable. More generally, type wildcards allow us to leave parts of a type signature unspecified.
 
 Function `f` can now of course be applied to any module satisfying the type signature:
 
     λ> f (import "Prelude.x")
-    {l = [False, True], r = "cba"}
+    {l = [False, True], r = [3,2,1]}
 
 
 ### Difference records and concatenation
@@ -258,7 +258,7 @@ We could use Expresso as a lightweight data-exchange format (i.e. JSON with type
 
 A simple type annotation `<term> : <type>` , will not suffice for "schema validation". For example, consider this attempt at validating an integer against a schema that permits everything:
 
-    1 : forall a. a        -- FAILS
+    1 : forall a. a        -- DOES NOT TYPE CHECK!
 
 The above fails to type check since the left-hand-side is inferred as the most general type (here a concrete int) and the right-hand-side must be less so.
 
@@ -293,7 +293,7 @@ Expresso uses lazy evaluation in the hope that it might lead to efficiency gains
 Turing equivalence is introduced via a single `fix` primitive, which can be easily removed or disabled.
 `fix` can be useful to achieve open recursive records and dynamic binding (à la Nix).
 
-    λ> let r = mkOverridable (self -> {x = "foo", y = self.x ++ "bar"})
+    λ> let r = mkOverridable (self -> {x = "foo", y = self.x <> "bar"})
     λ> r
     {override_ = <Lambda>, x = "foo", y = "foobar"}
 
@@ -307,7 +307,7 @@ Note that removing `fix` and Turing equivalence does not guarantee termination i
 Expresso can be used as a typed configuration file format from within Haskell programs. As an example, let's consider a hypothetical small config file for a backup program:
 
     let awsTemplate =
-        { location ="s3://s3-eu-west-2.amazonaws.com/atavachron-backup"
+        { location ="s3://s3-eu-west-2.amazonaws.com/tim-backup"
         , include  = []
         , exclude  = []
         }
@@ -315,8 +315,14 @@ Expresso can be used as a typed configuration file format from within Haskell pr
     { cachePath   = Default{}
     , taskThreads = Override 2
     , profiles =
-       [ { name = "pictures", source = "~/Pictures" | awsTemplate }
-       , { name = "music", source = "~/Music", exclude := ["**/*.m4a"] | awsTemplate }
+       [ { name = "pictures"
+         , source = "~/Pictures"
+         | awsTemplate
+         }
+       , { name = "music"
+         , source = "~/Music"
+         , exclude := ["**/*.m4a"]
+         | awsTemplate }
        ]
     }
 
