@@ -24,14 +24,14 @@ let
     ----------------------------------------------------------------
     -- Maybe operations - smart constructors create closed variants
 
-    just        = x -> Just x
-                : forall a. a -> <Just : a, Nothing : {}>;
+    just        : forall a. a -> <Just : a, Nothing : {}>
+                = x -> Just x;
 
-    nothing     = Nothing{}
-                : forall a. <Just : a, Nothing : {}>;
+    nothing     : forall a. <Just : a, Nothing : {}>
+                = Nothing{};
 
-    maybe       = b f m -> case m of { Just a -> f a, Nothing{} -> b }
-                : forall a b. b -> (a -> b) -> <Just : a, Nothing : {}> -> b;
+    maybe       : forall a b. b -> (a -> b) -> <Just : a, Nothing : {}> -> b
+                = b f m -> case m of { Just a -> f a, Nothing{} -> b };
 
     isJust      = maybe False (const True);
     isNothing   = maybe True (const False);
@@ -44,14 +44,14 @@ let
     ----------------------------------------------------------------
     -- Either operations - smart constructors create closed variants
 
-    left        = x -> Left x
-                : forall a b. a -> <Left : a, Right : b>;
+    left        : forall a b. a -> <Left : a, Right : b>
+                = x -> Left x;
 
-    right       = x -> Right x
-                : forall a b. b -> <Left : a, Right : b>;
+    right       : forall a b. b -> <Left : a, Right : b>
+                = x -> Right x;
 
-    either      = f g m -> case m of { Left a -> f a, Right b -> g b }
-                : forall a b c. (a -> c) -> (b -> c) -> <Left : a, Right : b> -> c;
+    either      : forall a b c. (a -> c) -> (b -> c) -> <Left : a, Right : b> -> c
+                = f g m -> case m of { Left a -> f a, Right b -> g b };
 
     ----------------------------------------------------------------
     -- Logical operations

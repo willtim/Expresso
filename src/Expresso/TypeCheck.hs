@@ -324,7 +324,7 @@ tcRho = cata alg
     alg (EPrim prim :*: K pos) mty = do
         let sigma = tcPrim pos prim
         instSigma pos sigma mty
-    alg (ELam b e :*: K pos) Nothing = do -- TODO see Mu tCheckPats?
+    alg (ELam b e :*: K pos) Nothing = do
         varT <- newMetaVar pos CNone 'a'
         binds <- tcBinds pos b $ Just varT
         extendEnv binds $ do
@@ -356,6 +356,13 @@ tcRho = cata alg
     alg (ELet b e1 e2 :*: K pos) mty = do
         t1 <- e1 Nothing
         binds <- tcBinds pos b (Just t1) >>= mapM (inferSigma pos)
+        extendEnv binds $
+            e2 mty
+    alg (EAnnLet b varT e1 e2 :*: K pos) mty = do
+        varT  <- instWildcards varT
+        t1 <- e1 Nothing
+        subsCheck pos t1 varT
+        binds <- tcBinds pos b $ Just varT
         extendEnv binds $
             e2 mty
     alg (EAnn e annT :*: K pos) mty = do
@@ -460,10 +467,16 @@ unifyFun pos tau = do
     return (argT, resT)
 
 -- used by the Repl
-tcDecl :: Pos -> Bind Name -> Exp -> TI TypeEnv
-tcDecl pos b e = do
+tcDecl :: Pos -> Bind Name -> Maybe Type -> Exp -> TI TypeEnv
+tcDecl pos b Nothing e = do
    t <- tcRho e Nothing
    binds <- tcBinds pos b (Just t) >>= mapM (inferSigma pos)
+   extendEnv binds ask
+tcDecl pos b (Just varT) e = do
+   varT  <- instWildcards varT
+   t <- tcRho e Nothing
+   subsCheck pos t varT
+   binds <- tcBinds pos b $ Just varT
    extendEnv binds ask
 
 tcPrim :: Pos -> Prim -> Type

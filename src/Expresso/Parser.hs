@@ -79,7 +79,7 @@ pLet     = reserved "let" *>
                                <*> (reserved "in" *> pExp))
            <?> "let expression"
 
-pLetDecl = (,) <$> pLetBind
+pLetDecl = (,) <$> (Right <$> (try pAnnBind) <|> Left <$> pLetBind)
                <*> (reservedOp "=" *> pExp <* whiteSpace)
 
 pLam     = mkLam
@@ -90,11 +90,11 @@ pLam     = mkLam
 
 pAnnLam  = mkAnnLam
        <$> getPosition
-       <*> try (many1 pAnnBind <* reservedOp "->" <* whiteSpace)
+       <*> try (many1 (parens pAnnBind) <* reservedOp "->" <* whiteSpace)
        <*> pExp'
        <?> "lambda expression with type annotated argument"
 
-pAnnBind = parens $ (,) <$> pBind <*> (reservedOp ":" *> pTypeAnn)
+pAnnBind = (,) <$> pBind <*> (reservedOp ":" *> pTypeAnn)
 
 pAtom    = pPrim <|> try pVar <|> parens (pSection <|> pExp)
 
@@ -102,7 +102,7 @@ pSection = pSigSection
 
 pSigSection = mkSigSection <$> getPosition <*> (reservedOp ":" *> pTypeAnn)
 
-pVar     = mkVar <$> getPosition <*> identifier
+pVar     = mkVar <$> getPosition <*> lowerIdentifier
 
 pPrim    = pNumber           <|>
            pBool             <|>
@@ -206,7 +206,7 @@ pString = (\pos -> mkPrim pos . Text . T.pack)
        <$> getPosition
        <*> stringLiteral
 
-pBind = Arg <$> identifier
+pBind = Arg <$> lowerIdentifier
     <|> RecArg <$> pFieldPuns
 
 pLetBind = try (RecWildcard <$ reservedOp "{..}") <|> pBind
@@ -335,8 +335,11 @@ mkSigSection pos ty =
 mkVar :: Pos -> Name -> ExpI
 mkVar pos name = withPos pos (EVar name)
 
-mkLet :: (Pos, (Bind Name, ExpI)) -> ExpI -> ExpI
-mkLet (pos, (b, e1)) e2 = withPos pos (ELet b e1 e2)
+mkLet :: (Pos, (Either (Bind Name) (Bind Name, Type), ExpI)) -> ExpI -> ExpI
+mkLet (pos, (bind, e1)) e2 = withPos pos $
+    case bind of
+        Left b       -> ELet b e1 e2
+        Right (b, t) -> EAnnLet b t e1 e2
 
 mkTertiaryOp :: Pos -> Prim -> ExpI -> ExpI -> ExpI -> ExpI
 mkTertiaryOp pos p x y z = mkApp pos (mkPrim pos p) [x, y, z]

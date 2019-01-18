@@ -172,12 +172,13 @@ validate ty e = Parser.mkApp pos (Parser.mkSigSection pos ty) [e]
 bind
     :: Environments
     -> Bind Name
+    -> Maybe Type
     -> ExpI
     -> EvalM Environments
-bind (Environments tEnv tState env) b ei = do
+bind (Environments tEnv tState env) b mty ei = do
     e     <- Parser.resolveImports ei
     let (res'e, tState') =
-            TypeCheck.runTI (TypeCheck.tcDecl (getAnn ei) b e) tEnv tState
+            TypeCheck.runTI (TypeCheck.tcDecl (getAnn ei) b mty e) tEnv tState
     case res'e of
         Left err    -> throwError err
         Right tEnv' -> do

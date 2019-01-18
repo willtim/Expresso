@@ -147,23 +147,32 @@ eval env e = cata alg e env
     alg :: (ExpF Name Bind Type :*: K Pos) (Env -> EvalM Value)
         -> Env
         -> EvalM Value
-    alg (EVar v :*: _)         env = lookupValue env v >>= force
-    alg (EApp f x :*: K pos)   env = do
+    alg (EVar v :*: _)            env = lookupValue env v >>= force
+    alg (EApp f x :*: K pos)      env = do
         f' <- f env
         x' <- mkThunk (x env)
         evalApp pos f' x'
-    alg (ELam b e1 :*: _  )    env = evalLam env b e1
-    alg (EAnnLam b _ e1 :*: _) env = evalLam env b e1
-    alg (ELet b e1 e2 :*: _)   env = do
-        t    <- mkThunk $ e1 env
-        env' <- bind env b t
-        e2 env'
-    alg (EPrim p :*: K pos)    _   = return $ evalPrim pos p
-    alg (EAnn e _ :*: _)       env = e env
+    alg (ELam b e1 :*: _  )       env = evalLam env b e1
+    alg (EAnnLam b _ e1 :*: _)    env = evalLam env b e1
+    alg (ELet b e1 e2 :*: _)      env = evalLet env b e1 e2
+    alg (EAnnLet b _ e1 e2 :*: _) env = evalLet env b e1 e2
+    alg (EPrim p :*: K pos)       _   = return $ evalPrim pos p
+    alg (EAnn e _ :*: _)          env = e env
 
 evalLam :: Env -> Bind Name -> (Env -> EvalM Value) -> EvalM Value
 evalLam env b e = return $ VLam $ \x ->
     bind env b x >>= e
+
+evalLet
+    :: Env
+    -> Bind Name
+    -> (Env -> EvalM Value)
+    -> (Env -> EvalM Value)
+    -> EvalM Value
+evalLet env b e1 e2 = do
+    t    <- mkThunk $ e1 env
+    env' <- bind env b t
+    e2 env'
 
 evalApp :: Pos -> Value -> Thunk -> EvalM Value
 evalApp _   (VLam f)   t  = f t

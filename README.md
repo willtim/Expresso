@@ -207,9 +207,11 @@ Here the unmatched variant is passed to a lambda (with `otherwise` as the parame
 
 We will often need to create closed variant types. For example, we may want to create a structural type analogous to Haskell's `Maybe a`, having only two constructors: `Nothing` and `Just`. This can be accomplished using smart constructors with type annotations. In the Prelude, we define the equivalent constructors `just` and `nothing`, as well as a fold `maybe` over this closed set:
 
-    just        = x -> Just x  : forall a. a -> <Just : a, Nothing : {}>;
+    just        : forall a. a -> <Just : a, Nothing : {}>
+                = x -> Just x;
 
-    nothing     = Nothing{}    : forall a. <Just : a, Nothing : {}>;
+    nothing     : forall a. <Just : a, Nothing : {}>
+                = Nothing{};
 
     maybe       = b f m -> case m of { Just a -> f a, Nothing{} -> b }
 

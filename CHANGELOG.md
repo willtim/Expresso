@@ -1,7 +1,8 @@
 # Change Log
 
-## 0.1.1.1
+## 0.1.2.0
 
+- let bindings can now be annotated with types
 - added a text append primitive
 
 ## 0.1.1.0

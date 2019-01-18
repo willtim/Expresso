@@ -1,4 +1,5 @@
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE TupleSections #-}
 
 -- |
 -- Module      : Main
@@ -56,7 +57,7 @@ data Command
 data Line
   = Command Command
   | Term ExpI
-  | Decl (Bind Name) ExpI
+  | Decl (Bind Name, Maybe Type) ExpI
   | NoOp
 
 type Repl = InputT (StateT ReplState IO)
@@ -103,11 +104,11 @@ repl = step repl
 process :: String -> Repl ()
 process str = do
   case parseLine str of
-    Left err            -> spew err
-    Right (Command c)   -> doCommand c
-    Right (Term e)      -> doEval showValue' e
-    Right (Decl b e)    -> doDecl b e
-    Right NoOp          -> return ()
+    Left err                -> spew err
+    Right (Command c)       -> doCommand c
+    Right (Term e)          -> doEval showValue' e
+    Right (Decl (b, mty) e) -> doDecl b mty e
+    Right NoOp              -> return ()
  `HL.catch` handler
   where
     handler :: HL.SomeException -> Repl ()
@@ -128,7 +129,7 @@ emptyReplState = ReplState
 
 loadPrelude :: FilePath -> Repl ()
 loadPrelude path = do
-  doDecl RecWildcard $ Fix (InR (K (Import path)) :*: K dummyPos)
+  doDecl RecWildcard Nothing $ Fix (InR (K (Import path)) :*: K dummyPos)
   spew $ "Loaded Prelude from " ++ path
 
 doCommand :: Command -> Repl ()
@@ -163,10 +164,10 @@ doEval pp e = do
       Left err  -> spew err
       Right val -> liftIO (pp val) >>= spew
 
-doDecl :: Bind Name -> ExpI -> Repl ()
-doDecl b e = do
+doDecl :: Bind Name -> Maybe Type -> ExpI -> Repl ()
+doDecl b mty e = do
   envs   <- lift $ gets stateEnv
-  envs'e <- liftIO $ runEvalM $ bind envs b e
+  envs'e <- liftIO $ runEvalM $ bind envs b mty e
   case envs'e of
       Left err    -> spew err
       Right envs' -> lift $ modify (setEnv envs')
@@ -200,7 +201,8 @@ pTerm :: Parser Line
 pTerm = Term <$> pExp
 
 pDecl :: Parser Line
-pDecl = uncurry Decl <$> (reserved "let" *> pLetDecl)
+pDecl = (uncurry Decl . first (either (,Nothing) (second Just)))
+    <$> (reserved "let" *> pLetDecl)
 
 pCommand :: Parser Line
 pCommand = Command <$> (reservedOp ":" *> p)
