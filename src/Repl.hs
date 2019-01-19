@@ -47,6 +47,7 @@ data ReplState = ReplState
 data Command
   = Peek      ExpI
   | Type      ExpI
+  | Load      FilePath
   | ChangeCWD FilePath
   | BeginMulti
   | Reset
@@ -129,13 +130,14 @@ emptyReplState = ReplState
 
 loadPrelude :: FilePath -> Repl ()
 loadPrelude path = do
-  doDecl RecWildcard Nothing $ Fix (InR (K (Import path)) :*: K dummyPos)
+  doLoad path
   spew $ "Loaded Prelude from " ++ path
 
 doCommand :: Command -> Repl ()
 doCommand c = case c of
   Peek e         -> doEval (return . showValue) e
   Type e         -> doTypeOf e
+  Load path      -> doLoad path
   ChangeCWD path -> liftIO $ setCurrentDirectory path
   Quit           -> lift $ modify (setMode Quitting)
   BeginMulti     -> lift $ modify (setMode MultiLine)
@@ -146,6 +148,7 @@ doCommand c = case c of
     , ""
     , "<expression>                evaluate an expression"
     , ":peek <expression>          evaluate, but not deeply"
+    , ":load <filename>            import record expression as a module"
     , ":{\\n ..lines.. \\n:}\\n       multiline command"
     , ":cd <path>                  change current working directory"
     , ":type <term>                show the type of <term>"
@@ -163,6 +166,11 @@ doEval pp e = do
   case v'e of
       Left err  -> spew err
       Right val -> liftIO (pp val) >>= spew
+
+doLoad :: FilePath -> Repl ()
+doLoad path =
+  doDecl RecWildcard Nothing
+       $ Fix (InR (K (Import path)) :*: K dummyPos)
 
 doDecl :: Bind Name -> Maybe Type -> ExpI -> Repl ()
 doDecl b mty e = do
@@ -209,6 +217,7 @@ pCommand = Command <$> (reservedOp ":" *> p)
   where
     p =  (reserved "peek"  <|> reserved "p") *> (Peek      <$> pExp)
      <|> (reserved "type"  <|> reserved "t") *> (Type      <$> pExp)
+     <|> (reserved "load"  <|> reserved "l") *> (Load      <$> pFilePath)
      <|> reserved "cd"                       *> (ChangeCWD <$> pFilePath)
      <|> (reserved "reset" <|> reserved "r") *> pure Reset
      <|> (reserved "env"   <|> reserved "e") *> pure DumpEnv
