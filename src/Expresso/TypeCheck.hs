@@ -8,6 +8,7 @@
 {-# LANGUAGE TypeOperators #-}
 {-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE ViewPatterns #-}
+{-# OPTIONS_GHC -fmax-pmcheck-iterations=10000000 #-}
 
 -- |
 -- Module      : Expresso.TypeCheck
@@ -59,15 +60,26 @@ data TIState = TIState
     , tiSubst  :: Subst
     }
 
-type TI a = ExceptT String (ReaderT TypeEnv (State TIState)) a
+data TIEnv = TIEnv
+    { tiTypeEnv  :: TypeEnv
+    , tiSynonyms :: Synonyms
+    }
+
+type TI a = ExceptT String (ReaderT TIEnv (State TIState)) a
 
 -- | Type check the supplied expression.
 typeCheck :: Exp -> TI Sigma
 typeCheck e = tcRho e Nothing >>= inferSigma (getAnn e)
 
 -- | Run the type inference monad.
-runTI :: TI a -> TypeEnv -> TIState -> (Either String a, TIState)
-runTI t tEnv tState = runState (runReaderT (runExceptT t) tEnv) tState
+runTI
+    :: TI a
+    -> TypeEnv
+    -> Synonyms
+    -> TIState
+    -> (Either String a, TIState)
+runTI t tEnv syns tState =
+    runState (runReaderT (runExceptT t) (TIEnv tEnv syns)) tState
 
 -- | Initial state of the inference engine.
 initTIState :: TIState
@@ -100,7 +112,8 @@ newMetaTyVar c prefix = do
   return $ MetaTv i prefix c
 
 getEnvTypes :: TI [Sigma]
-getEnvTypes = (M.elems . unTypeEnv <$> ask) >>= mapM substType
+getEnvTypes =
+    (M.elems . unTypeEnv <$> asks tiTypeEnv) >>= mapM substType
 
 substType :: Type -> TI Type
 substType t = do
@@ -109,14 +122,15 @@ substType t = do
 
 lookupVar :: Pos -> Name -> TI Sigma
 lookupVar pos name = do
-    TypeEnv env <- ask
+    TypeEnv env <- asks tiTypeEnv
     case M.lookup name env of
         Just s  -> return s
         Nothing -> throwError $ show $
             ppPos pos <+> ": unbound variable:" <+> text name
 
 extendEnv :: M.Map Name Sigma -> TI a -> TI a
-extendEnv binds = local (TypeEnv binds <>)
+extendEnv binds =
+    local $ \e -> e { tiTypeEnv = TypeEnv binds <> tiTypeEnv e }
 
 -- | Quantify over the specified type variables (all flexible).
 quantify :: Pos -> [MetaTv] -> Rho -> Sigma
@@ -185,6 +199,19 @@ mgu l@(TMetaVar v) t = varBind (getAnn l) v t
 mgu t r@(TMetaVar v) = varBind (getAnn r) v t
 mgu (TVar u) (TVar v)
     | u == v = return nullSubst
+mgu t1@(TSynonym n1 ts1) t2@(TSynonym n2 ts2) -- no need to expand
+    | n1 == n2  = mconcat <$> zipWithM mgu ts1 ts2
+    | otherwise = throwError'
+    [ "Type synonyms do not unify:"
+    , ppPos (getAnn t1) <+> ":" <+> ppType t1
+    , ppPos (getAnn t2) <+> ":" <+> ppType t2
+    ]
+mgu l@(TSynonym n1 ts1) t2 = do
+    t1 <- expandSynonym (getAnn l) n1 ts1
+    mgu t1 t2
+mgu t1 r@(TSynonym n2 ts2) = do
+    t2 <- expandSynonym (getAnn r) n2 ts2
+    mgu t1 t2
 mgu TInt TInt = return nullSubst
 mgu TDbl TDbl = return nullSubst
 mgu TBool TBool = return nullSubst
@@ -203,11 +230,21 @@ mgu t1 t2 = throwError'
     , ppPos (getAnn t2) <+> ":" <+> ppType t2
     ]
 
+expandSynonym :: Pos -> Name -> [Type] -> TI Type
+expandSynonym pos name args = do
+    syns <- asks tiSynonyms
+    case lookupSynonym name args syns of
+        Just ty -> return ty
+        Nothing -> throwError'
+            [ "Could not expand type synonym:"
+            , ppPos pos <+> ":" <+> ppType (TSynonym name args)
+            ]
+
 unifyRow :: Type -> Type -> TI Subst
 unifyRow row1@TRowExtend{} row2@TRowEmpty = throwError' $
-    [ ppPos (getAnn row1) <+> ": cannot insert the label(s)"
+    [ ppPos (getAnn row1) <+> ": unexpected row label(s)"
       <+> hcat (L.intersperse comma (map text . M.keys . rowToMap $ row1))
-    , "into row introduced at" <+> ppPos (getAnn row2)
+    , "at" <+> ppPos (getAnn row2)
     ]
 unifyRow row1@(TRowExtend label1 fieldTy1 rowTail1) row2@TRowExtend{} = do
   -- apply side-condition to ensure termination
@@ -246,18 +283,20 @@ varBind pos u t
         , "occurs in"
         , ppPos (getAnn t) <+> ppType t
         ]
-  | otherwise          =
+  | otherwise          = do
+        syns <- asks tiSynonyms
         case metaConstraint u of
             CNone  -> return $ u |-> t
             CStar c
-                | t `satisfies` metaConstraint u -> return $ u |-> t
+                | satisfies syns t (metaConstraint u) ->
+                      return $ u |-> t
                 | otherwise ->
-                         throwError'
-                             [ "The type:"
-                             , ppPos (getAnn t) <+> ":" <+> ppType t
-                             , "does not satisfy the constraint:"
-                             , ppPos pos <+> ":" <+> ppStarConstraint c
-                             ]
+                      throwError'
+                          [ "The type:"
+                          , ppPos (getAnn t) <+> ":" <+> ppType t
+                          , "does not satisfy the constraint:"
+                          , ppPos pos <+> ":" <+> ppStarConstraint c
+                          ]
             CRow{} -> varBindRow (getAnn t) u t
 
 -- | bind the row tyvar to the row type, as long as the row type does not
@@ -471,13 +510,13 @@ tcDecl :: Pos -> Bind Name -> Maybe Type -> Exp -> TI TypeEnv
 tcDecl pos b Nothing e = do
    t <- tcRho e Nothing
    binds <- tcBinds pos b (Just t) >>= mapM (inferSigma pos)
-   extendEnv binds ask
+   extendEnv binds (asks tiTypeEnv)
 tcDecl pos b (Just varT) e = do
    varT  <- instWildcards varT
    t <- tcRho e Nothing
    subsCheck pos t varT
    binds <- tcBinds pos b $ Just varT
-   extendEnv binds ask
+   extendEnv binds (asks tiTypeEnv)
 
 tcPrim :: Pos -> Prim -> Type
 tcPrim pos prim = annotate pos $ case prim of

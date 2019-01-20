@@ -1,5 +1,6 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 
@@ -19,6 +20,7 @@ module Expresso.Parser where
 import Control.Applicative
 import Control.Monad
 import Control.Monad.Except
+import Control.Monad.Writer
 import Data.Maybe
 import Text.Parsec hiding (many, optional, parse, (<|>))
 import Text.Parsec.Language (emptyDef)
@@ -29,7 +31,8 @@ import qualified Text.Parsec as P
 import qualified Text.Parsec.Expr as P
 import qualified Text.Parsec.Token as P
 
-import Expresso.Pretty (Doc, (<+>), render, parensList, text, dquotes, vcat)
+import Expresso.Pretty ( Doc, (<+>), render, parensList
+                       , text, dquotes, vcat)
 import Expresso.Syntax
 import Expresso.Type
 import Expresso.Utils
@@ -37,20 +40,40 @@ import Expresso.Utils
 ------------------------------------------------------------
 -- Resolve imports
 
-resolveImports :: ExpI -> ExceptT String IO Exp
-resolveImports = cataM alg where
+resolveImports
+    :: ExpI
+    -> ExceptT String IO (Exp, [SynonymDecl])
+resolveImports = runWriterT . resolveImports'
+
+resolveImports'
+    :: ExpI
+    -> WriterT [SynonymDecl] (ExceptT String IO) Exp
+resolveImports' = cataM alg where
   alg (InR (K (Import path)) :*: _) = do
-      res <- ExceptT $ readFile path >>= return . parse path
-      resolveImports res
+      (syns, e) <- lift . ExceptT
+          $ readFile path >>= return . parse path
+      tell syns
+      resolveImports' e
   alg (InL e :*: pos) = return $ Fix (e :*: pos)
 
 ------------------------------------------------------------
 -- Parser
 
-parse :: SourceName -> String -> Either String ExpI
-parse src = showError . P.parse (topLevel pExp) src
+parse
+    :: SourceName
+    -> String
+    -> Either String ([SynonymDecl], ExpI)
+parse src = showError . P.parse (topLevel pTopLevel) src
 
 topLevel p = whiteSpace *> p <* P.eof
+
+pTopLevel = (,) <$> many (pSynonymDecl <* semi) <*> pExp
+
+pSynonymDecl = SynonymDecl
+       <$> getPosition
+       <*> (reserved "type" *> upperIdentifier)
+       <*> many1 pTyVar
+       <*> (reservedOp "=" *> pType)
 
 pExp     = addTypeAnnot
        <$> getPosition
@@ -79,8 +102,9 @@ pLet     = reserved "let" *>
                                <*> (reserved "in" *> pExp))
            <?> "let expression"
 
-pLetDecl = (,) <$> (Right <$> (try pAnnBind) <|> Left <$> pLetBind)
-               <*> (reservedOp "=" *> pExp <* whiteSpace)
+pLetDecl = (,,) <$> pLetBind
+                <*> optionMaybe (reservedOp ":" *> pTypeAnn)
+                <*> (reservedOp "=" *> pExp <* whiteSpace)
 
 pLam     = mkLam
        <$> getPosition
@@ -335,11 +359,11 @@ mkSigSection pos ty =
 mkVar :: Pos -> Name -> ExpI
 mkVar pos name = withPos pos (EVar name)
 
-mkLet :: (Pos, (Either (Bind Name) (Bind Name, Type), ExpI)) -> ExpI -> ExpI
-mkLet (pos, (bind, e1)) e2 = withPos pos $
-    case bind of
-        Left b       -> ELet b e1 e2
-        Right (b, t) -> EAnnLet b t e1 e2
+mkLet :: (Pos, (Bind Name, Maybe Type, ExpI)) -> ExpI -> ExpI
+mkLet (pos, (b, mty, e1)) e2 = withPos pos $
+    case mty of
+        Nothing -> ELet b e1 e2
+        Just t  -> EAnnLet b t e1 e2
 
 mkTertiaryOp :: Pos -> Prim -> ExpI -> ExpI -> ExpI -> ExpI
 mkTertiaryOp pos p x y z = mkApp pos (mkPrim pos p) [x, y, z]
@@ -400,6 +424,7 @@ pType' = pTVar
      <|> pTBool
      <|> pTChar
      <|> pTText
+     <|> pTSynonym
      <|> pTRecord
      <|> pTVariant
      <|> pTList
@@ -465,6 +490,11 @@ mkTForAll pos tvs (M.fromListWith unionConstraints -> m) t
 pTVar = (\pos -> withAnn pos . TVarF)
     <$> getPosition
     <*> (pTyVar <|> pTWildcard)
+
+pTSynonym = (\pos name -> withAnn pos . TSynonymF name)
+    <$> getPosition
+    <*> upperIdentifier
+    <*> many pType'
 
 pTInt  = pTCon TIntF "Int"
 pTDbl  = pTCon TDblF "Double"
@@ -538,6 +568,7 @@ languageDef = emptyDef
                          ]
     , P.reservedNames  = [ "let", "in", "if", "then", "else", "case", "of"
                          , "True", "False", "forall", "Eq", "Ord", "Num"
+                         , "type"
                          ]
     , P.caseSensitive  = True
     }

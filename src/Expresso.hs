@@ -1,3 +1,4 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# OPTIONS_GHC -Wno-unused-top-binds #-}
@@ -25,6 +26,7 @@ module Expresso
   , HasValue(..)
   , Import(..)
   , Name
+  , SynonymDecl(..)
   , Thunk(..)
   , TIState
   , Type
@@ -54,6 +56,8 @@ module Expresso
   , evalWithEnv
   , initEnvironments
   , installBinding
+  , installSynonyms
+  , uninstallSynonym
   , runEvalM
   , showType
   , showValue
@@ -76,9 +80,11 @@ module Expresso
   ) where
 
 import Control.Monad ((>=>))
-import Control.Monad.Except (ExceptT(..), runExceptT, throwError)
+import Control.Monad.Except ( MonadError, ExceptT(..), runExceptT
+                            , throwError)
 
-import Expresso.Eval (Env, EvalM, HasValue(..), Thunk(..), Value(..), insertEnv, runEvalM)
+import Expresso.Eval ( Env, EvalM, HasValue(..), Thunk(..), Value(..)
+                     , insertEnv, runEvalM)
 import Expresso.TypeCheck (TIState, initTIState)
 import Expresso.Pretty (render)
 import Expresso.Syntax
@@ -90,14 +96,15 @@ import qualified Expresso.Parser as Parser
 
 -- | Type and term environments.
 data Environments = Environments
-    { envsTypeEnv :: !TypeEnv
-    , envsTIState :: !TIState
-    , envsTermEnv :: !Env
+    { envsTypeEnv  :: !TypeEnv
+    , envsSynonyms :: !Synonyms
+    , envsTIState  :: !TIState
+    , envsTermEnv  :: !Env
     }
 
 -- | Empty initial type and term environments.
 initEnvironments :: Environments
-initEnvironments = Environments mempty initTIState mempty
+initEnvironments = Environments mempty mempty initTIState mempty
 
 -- | Install a binding using the supplied name, type and term.
 -- Useful for extending the set of built-in functions.
@@ -109,9 +116,10 @@ installBinding name ty val envs =
 
 -- | Query the type of an expression using the supplied type environment.
 typeOfWithEnv :: Environments -> ExpI -> IO (Either String Type)
-typeOfWithEnv (Environments tEnv tState _) ei = runExceptT $ do
-    e <- Parser.resolveImports ei
-    ExceptT $ return $ inferTypes tEnv tState e
+typeOfWithEnv (Environments tEnv syns tState _) ei = runExceptT $ do
+    (e, ss) <- Parser.resolveImports ei
+    syns'   <- insertSynonyms ss syns
+    ExceptT $ return $ inferTypes tEnv syns' tState e
 
 -- | Query the type of an expression.
 typeOf :: ExpI -> IO (Either String Type)
@@ -120,7 +128,7 @@ typeOf = typeOfWithEnv initEnvironments
 -- | Parse an expression and query its type.
 typeOfString :: String -> IO (Either String Type)
 typeOfString str = runExceptT $ do
-    top <- ExceptT $ return $ Parser.parse "<unknown>" str
+    (_, top) <- ExceptT $ return $ Parser.parse "<unknown>" str
     ExceptT $ typeOf top
 
 -- | Evaluate an expression using the supplied type and term environments.
@@ -129,10 +137,11 @@ evalWithEnv
     => Environments
     -> ExpI
     -> IO (Either String a)
-evalWithEnv (Environments tEnv tState env) ei = runExceptT $ do
-  e      <- Parser.resolveImports ei
-  _sigma <- ExceptT . return $ inferTypes tEnv tState e
-  ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e
+evalWithEnv (Environments tEnv syns tState env) ei = runExceptT $ do
+    (e, ss) <- Parser.resolveImports ei
+    syns'   <- insertSynonyms ss syns
+    _sigma  <- ExceptT . return $ inferTypes tEnv syns' tState e
+    ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e
 
 -- | Evaluate the contents of the supplied file path; and optionally
 -- validate using a supplied type (schema).
@@ -145,8 +154,9 @@ evalFile = evalFile' initEnvironments
 -- so that foreign functions and their types can be installed respectively.
 evalFile' :: HasValue a => Environments -> Maybe Type -> FilePath -> IO (Either String a)
 evalFile' envs mty path = runExceptT $ do
-    top <- ExceptT $ Parser.parse path <$> readFile path
-    ExceptT $ evalWithEnv envs (maybe id validate mty $ top)
+    (ss, top) <- ExceptT $ Parser.parse path <$> readFile path
+    envs' <- installSynonyms ss envs
+    ExceptT $ evalWithEnv envs' (maybe id validate mty $ top)
 
 -- | Parse an expression and evaluate it; optionally
 -- validate using a supplied type (schema).
@@ -159,8 +169,9 @@ evalString = evalString' initEnvironments
 -- so that foreign functions and their types can be installed respectively.
 evalString' :: HasValue a => Environments -> Maybe Type -> String -> IO (Either String a)
 evalString' envs mty str = runExceptT $ do
-    top <- ExceptT $ return $ Parser.parse "<unknown>" str
-    ExceptT $ evalWithEnv envs (maybe id validate mty $ top)
+    (ss, top) <- ExceptT $ return $ Parser.parse "<unknown>" str
+    envs' <- installSynonyms ss envs
+    ExceptT $ evalWithEnv envs' (maybe id validate mty $ top)
 
 -- | Add a validating type signature section to the supplied expression.
 validate :: Type -> ExpI -> ExpI
@@ -175,16 +186,17 @@ bind
     -> Maybe Type
     -> ExpI
     -> EvalM Environments
-bind (Environments tEnv tState env) b mty ei = do
-    e     <- Parser.resolveImports ei
+bind (Environments tEnv syns tState env) b mty ei = do
+    (e, ss) <- Parser.resolveImports ei
+    syns'   <- insertSynonyms ss syns
     let (res'e, tState') =
-            TypeCheck.runTI (TypeCheck.tcDecl (getAnn ei) b mty e) tEnv tState
+            TypeCheck.runTI (TypeCheck.tcDecl (getAnn ei) b mty e) tEnv syns' tState
     case res'e of
         Left err    -> throwError err
         Right tEnv' -> do
             thunk <- Eval.mkThunk $ Eval.eval env e
             env'  <- Eval.bind env b thunk
-            return $ Environments tEnv' tState' env'
+            return $ Environments tEnv' syns' tState' env'
 
 -- | Pretty print the supplied type.
 showType :: Type -> String
@@ -202,6 +214,30 @@ showValue' v = either id render <$> (runEvalM $ Eval.ppValue' v)
 dumpTypeEnv :: Environments -> [(Name, Sigma)]
 dumpTypeEnv = typeEnvToList . envsTypeEnv
 
-inferTypes :: TypeEnv -> TIState -> Exp -> Either String Type
-inferTypes tEnv tState e =
-    fst $ TypeCheck.runTI (TypeCheck.typeCheck e) tEnv tState
+inferTypes
+    :: TypeEnv
+    -> Synonyms
+    -> TIState
+    -> Exp
+    -> Either String Type
+inferTypes tEnv syns tState e =
+    fst $ TypeCheck.runTI (TypeCheck.typeCheck e) tEnv syns tState
+
+installSynonyms
+    :: MonadError String m
+    => [SynonymDecl]
+    -> Environments
+    -> m Environments
+installSynonyms ss envs = do
+    syns' <- insertSynonyms ss (envsSynonyms envs)
+    return $ envs { envsSynonyms = syns' }
+
+-- | Used by the REPL, deletes any previous definition.
+uninstallSynonym
+    :: SynonymDecl
+    -> Environments
+    -> Environments
+uninstallSynonym s envs =
+    let syns' = deleteSynonym (synonymName s)
+              $ envsSynonyms envs
+    in envs { envsSynonyms = syns' }

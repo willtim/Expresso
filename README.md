@@ -15,7 +15,7 @@ Expresso has the following features:
 - Structural typing with extensible records and variants
 - Lazy evaluation
 - Convenient use from Haskell (a type class for marshalling values)
-- Haskell-inspired syntax
+- Whitespace insensitive syntax
 - Type annotations to support first-class modules and schema validation use cases
 - Built-in support for ints, double, bools, chars and lists
 
@@ -148,7 +148,7 @@ Note that the `r`, representing the rest of the module fields, is a top-level qu
 
 Function `f` can now of course be applied to any module satisfying the type signature:
 
-    λ> f (import "Prelude.x")
+    λ> f (import "List.x")
     {l = [False, True], r = [3,2,1]}
 
 
@@ -207,14 +207,17 @@ Here the unmatched variant is passed to a lambda (with `otherwise` as the parame
 
 We will often need to create closed variant types. For example, we may want to create a structural type analogous to Haskell's `Maybe a`, having only two constructors: `Nothing` and `Just`. This can be accomplished using smart constructors with type annotations. In the Prelude, we define the equivalent constructors `just` and `nothing`, as well as a fold `maybe` over this closed set:
 
-    just        : forall a. a -> <Just : a, Nothing : {}>
+    type Maybe a = <Just : a, Nothing : {}>;
+
+    just        : forall a. a -> Maybe a
                 = x -> Just x;
 
-    nothing     : forall a. <Just : a, Nothing : {}>
+    nothing     : forall a. Maybe a
                 = Nothing{};
 
     maybe       = b f m -> case m of { Just a -> f a, Nothing{} -> b }
 
+Note that we declare and use a type synonym `Maybe a` to avoid repeating the type `<Just : a, Nothing : {}>`. Type synonyms can be included at the top of any file and have global scope.
 
 ### Variant embedding
 
@@ -309,7 +312,7 @@ Note that removing `fix` and Turing equivalence does not guarantee termination i
 Expresso can be used as a typed configuration file format from within Haskell programs. As an example, let's consider a hypothetical small config file for a backup program:
 
     let awsTemplate =
-        { location ="s3://s3-eu-west-2.amazonaws.com/tim-backup"
+        { location ="s3://s3-eu-west-1.amazonaws.com/tim-backup"
         , include  = []
         , exclude  = []
         }

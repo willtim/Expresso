@@ -12,7 +12,7 @@
 --
 -- Quasi-quoters for defining Expresso types in Haskell.
 --
-module Expresso.TH.QQ (expressoType) where
+module Expresso.TH.QQ (expressoType, expressoTypeSyn) where
 
 import Control.Exception
 
@@ -27,7 +27,11 @@ import Expresso.Parser
 
 -- | Expresso Quasi-Quoter for type declarations.
 expressoType :: QuasiQuoter
-expressoType = def { quoteExp = genTypeDecl }
+expressoType = def { quoteExp = genTypeAnn }
+
+-- | Expresso Quasi-Quoter for type synonym declarations.
+expressoTypeSyn :: QuasiQuoter
+expressoTypeSyn = def { quoteExp = genTypeSynDecl }
 
 def :: QuasiQuoter
 def = QuasiQuoter
@@ -40,10 +44,16 @@ def = QuasiQuoter
     failure kind =
         fail $ "This quasi-quoter does not support splicing " ++ kind
 
-genTypeDecl :: String -> ExpQ
-genTypeDecl str = do
+genTypeAnn :: String -> ExpQ
+genTypeAnn str = do
     l <- location'
     c <- runIO $ parseIO (P.setPosition l *> topLevel pTypeAnn) str
+    dataToExpQ (const Nothing) c
+
+genTypeSynDecl :: String -> ExpQ
+genTypeSynDecl str = do
+    l <- location'
+    c <- runIO $ parseIO (P.setPosition l *> topLevel pSynonymDecl) str
     dataToExpQ (const Nothing) c
 
 -- | find the current location in the Haskell source file and convert it to parsec @SourcePos@.

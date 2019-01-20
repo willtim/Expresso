@@ -2,12 +2,14 @@
 {-# LANGUAGE DeriveFoldable #-}
 {-# LANGUAGE DeriveFunctor #-}
 {-# LANGUAGE DeriveTraversable #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
 {-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
@@ -27,9 +29,10 @@
 --
 module Expresso.Type where
 
-import Text.Parsec (SourcePos)
-import Text.Parsec.Pos (newPos)
-
+import Control.Monad
+import Control.Monad.Except
+import Data.Data
+import Data.Foldable (fold)
 import Data.IntMap (IntMap)
 import Data.Map (Map)
 import Data.Set (Set)
@@ -37,8 +40,8 @@ import qualified Data.Map as M
 import qualified Data.IntMap as IM
 import qualified Data.Set as S
 
-import Data.Data
-import Data.Foldable (fold)
+import Text.Parsec (SourcePos)
+import Text.Parsec.Pos (newPos)
 
 import Expresso.Pretty
 import Expresso.Utils
@@ -67,6 +70,7 @@ data TypeF r
   = TForAllF  [TyVar] r
   | TVarF     TyVar
   | TMetaVarF MetaTv
+  | TSynonymF Name [r]
   | TIntF
   | TDblF
   | TBoolF
@@ -126,6 +130,61 @@ insertTypeEnv name ty (TypeEnv m) = TypeEnv $ M.insert name ty m
 typeEnvToList :: TypeEnv -> [(Name, Sigma)]
 typeEnvToList (TypeEnv m) = M.toList m
 
+-- | Global map of type synonym definitions.
+newtype Synonyms = Synonyms { unSynonym :: Map Name SynonymDecl }
+  deriving (Semigroup, Monoid)
+
+-- | A type synonym definition.
+data SynonymDecl = SynonymDecl
+    { synonymPos    :: Pos
+    , synonymName   :: Name
+    , synonymParams :: [TyVar]
+    , synonymBody   :: Type
+    } deriving (Typeable, Data)
+
+-- | Lookup and expand a type synonym.
+-- Returns Nothing if the lookup or expansion failed.
+lookupSynonym :: Name -> [Type] -> Synonyms -> Maybe Sigma
+lookupSynonym name args (Synonyms m) = do
+    SynonymDecl{..} <- M.lookup name m
+    guard $ length synonymParams == length args
+    return $ substTyVar synonymParams args synonymBody
+
+-- | Used by the REPL.
+deleteSynonym :: Name -> Synonyms -> Synonyms
+deleteSynonym name (Synonyms m) =
+    Synonyms $ M.delete name m
+
+-- | Checks for duplicate synonym names and free variables.
+insertSynonyms
+    :: MonadError String m
+    => [SynonymDecl]
+    -> Synonyms
+    -> m Synonyms
+insertSynonyms ss (Synonyms m) =
+    Synonyms <$> foldM f m ss
+  where
+    f m syn
+        | Just syn' <- M.lookup (synonymName syn) m =
+            throwError $ unwords
+                [ "Duplicate synonyms with name"
+                , "'" ++ synonymName syn ++ "'"
+                , "at"
+                , show (synonymPos syn)
+                , "and"
+                , show (synonymPos syn')
+                ]
+        | fvs <- ftv (synonymBody syn)
+            S.\\ S.fromList (synonymParams syn)
+        , not (S.null fvs) =
+            throwError $ unwords
+                [ "Free variables in type synonym definition:"
+                , "'" ++ synonymName syn ++ "'"
+                , "at"
+                , show (synonymPos syn)
+                ]
+        | otherwise = return $ M.insert (synonymName syn) syn m
+
 instance View TypeF Type where
   proj    = left . unFix
   inj  e  = Fix (e :*: K dummyPos)
@@ -144,6 +203,8 @@ pattern TVar v             <- (proj -> (TVarF v)) where
   TVar v = inj (TVarF v)
 pattern TMetaVar v         <- (proj -> (TMetaVarF v)) where
   TMetaVar v = inj (TMetaVarF v)
+pattern TSynonym v ts      <- (proj -> (TSynonymF v ts)) where
+  TSynonym v ts = inj (TSynonymF v ts)
 pattern TInt               <- (proj -> TIntF) where
   TInt = inj TIntF
 pattern TDbl               <- (proj -> TDblF) where
@@ -286,6 +347,7 @@ rowToMap :: Type -> Map Name Type
 rowToMap (TRowExtend l t r) = M.insert l t (rowToMap r)
 rowToMap TRowEmpty          = M.empty
 rowToMap TVar{}             = M.empty -- default any row vars to empty row
+rowToMap TMetaVar{}         = M.empty
 rowToMap t                  = error $ "Unexpected row type: " ++ show (ppType t)
 
 
@@ -293,8 +355,8 @@ rowToMap t                  = error $ "Unexpected row type: " ++ show (ppType t)
 -- Constraints
 
 -- | True if the supplied type of kind Star satisfies the supplied constraint
-satisfies :: Type -> Constraint -> Bool
-satisfies t c =
+satisfies :: Synonyms -> Type -> Constraint -> Bool
+satisfies syns t c =
     case (infer t, c) of
         (CNone,    CNone)    -> True
         (CStar{},  CNone)    -> True
@@ -303,25 +365,30 @@ satisfies t c =
         (c1, c2)  -> error $ "satisfies: kind mismatch: " ++ show (c1, c2)
   where
     infer :: Type -> Constraint
-    infer (TForAll _ t) = infer t
-    infer (TVar     v)  = tyvarConstraint v
-    infer (TMetaVar m)  = metaConstraint m
-    infer TInt          = CStar CNum
-    infer TDbl          = CStar CNum
-    infer TBool         = CStar COrd
-    infer TChar         = CStar COrd
-    infer TText         = CStar COrd
-    infer TFun{}        = CNone
-    infer (TList t)     = minC (CStar COrd) (infer t)
-    infer (TRecord r)   =
-        maybe CNone (minC (CStar CEq)) $ inferFromRow r
-    infer (TVariant r)  =
+    infer (TForAll _ t)   = infer t
+    infer (TVar     v)    = tyvarConstraint v
+    infer (TMetaVar m)    = metaConstraint m
+    infer (TSynonym n ts) =
+        maybe CNone infer $ lookupSynonym n ts syns
+    infer TInt            = CStar CNum
+    infer TDbl            = CStar CNum
+    infer TBool           = CStar COrd
+    infer TChar           = CStar COrd
+    infer TText           = CStar COrd
+    infer TFun{}          = CNone
+    infer (TList t)       = minC (CStar COrd) $ infer t
+    infer (TRecord r)     = -- NB: unit supports equality
+        maybe (CStar CEq) (minC (CStar CEq)) $ inferFromRow r
+    infer (TVariant r)    = -- NB: void does not support equality
         maybe CNone (minC (CStar CEq)) $ inferFromRow r
     infer t = error $ "satisfies/infer: unexpected type: " ++ show t
 
+    -- infer star constraints from row types
     inferFromRow :: Type -> Maybe Constraint
     inferFromRow TVar{}     = Nothing
     inferFromRow TMetaVar{} = Nothing
+    inferFromRow (TSynonym n ts) =
+        lookupSynonym n ts syns >>= inferFromRow
     inferFromRow TRowEmpty  = Nothing
     inferFromRow (TRowExtend _ t r) = Just $
         maybe (infer t) (minC (infer t)) $ inferFromRow r
@@ -356,9 +423,10 @@ tcPrec     = 2  -- Precedence of (T a b)
 atomicPrec = 3  -- Precedence of t
 
 precType :: Type -> Precedence
-precType (TForAll _ _) = topPrec
-precType (TFun _ _)    = arrPrec
-precType _             = atomicPrec
+precType (TForAll _ _)  = topPrec
+precType (TFun _ _)     = arrPrec
+precType (TSynonym _ _) = tcPrec
+precType _              = atomicPrec
 
 -- | Print with parens if precedence arg > precedence of type itself
 ppType' :: Precedence -> Type -> Doc
@@ -370,6 +438,7 @@ ppType :: Type -> Doc
 ppType (TForAll vs t)     = ppForAll (vs, t)
 ppType (TVar v)           = text $ tyvarName v
 ppType (TMetaVar v)       = "v" <> int (metaUnique v)
+ppType (TSynonym n ts)    = text n <+> hsep (map (ppType' tcPrec) ts)
 ppType TInt               = "Int"
 ppType TDbl               = "Double"
 ppType TBool              = "Bool"
@@ -395,7 +464,7 @@ ppRowType r = sepBy comma (map ppEntry ls)
 ppForAll :: ([TyVar], Type) -> Doc
 ppForAll (vars, t)
   | null vars = ppType' topPrec t
-  | otherwise = "forall" <+> (catBy space $ map (ppType . TVar) vars) <> dot
+  | otherwise = "forall" <+> (hsep $ map (ppType . TVar) vars) <> dot
                          <>  (let cs = concatMap ppConstraint vars
                               in if null cs then mempty else space <> (parensList cs <+> "=>"))
                          <+> ppType' topPrec t

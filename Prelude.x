@@ -1,8 +1,11 @@
 --
 -- Expresso Prelude
 --
-let
 
+type Maybe a = <Just : a, Nothing : {}>;
+type Either a b = <Left : a, Right : b>;
+
+let
     id    = x -> x;
     const = x y -> x;
     flip  = f x y -> (f y x);
@@ -10,27 +13,23 @@ let
     ----------------------------------------------------------------
     -- List operations
 
-    map         = f -> foldr (x xs -> f x :: xs) [];
-    filter      = f -> foldr (x xs -> if f x then (x::xs) else xs);
-    length      = foldr (const (n -> 1 + n)) 0;
-    foldl       = f z xs -> foldr (x xsf r -> xsf (f r x)) id xs z;
-    reverse     = foldl (xs x -> x :: xs) [];
-    concat      = xss -> foldr (xs ys -> xs ++ ys) [] xss;
-    intersperse = sep xs ->
-        let f   = x xs -> (if null xs then [x] else x :: sep :: xs)
-        in foldr f [] xs;
-    intercalate = xs xss -> concat (intersperse xs xss);
+    list        = import "List.x";
+
+    ----------------------------------------------------------------
+    -- Text operations
+
+    text        = import "Text.x";
 
     ----------------------------------------------------------------
     -- Maybe operations - smart constructors create closed variants
 
-    just        : forall a. a -> <Just : a, Nothing : {}>
+    just        : forall a. a -> Maybe a
                 = x -> Just x;
 
-    nothing     : forall a. <Just : a, Nothing : {}>
+    nothing     : forall a. Maybe a
                 = Nothing{};
 
-    maybe       : forall a b. b -> (a -> b) -> <Just : a, Nothing : {}> -> b
+    maybe       : forall a b. b -> (a -> b) -> Maybe a -> b
                 = b f m -> case m of { Just a -> f a, Nothing{} -> b };
 
     isJust      = maybe False (const True);
@@ -38,19 +37,19 @@ let
     fromMaybe   = x -> maybe x id;
     listToMaybe = foldr (x -> const (just x)) nothing;
     maybeToList = maybe [] (x -> [x]);
-    catMaybes   = xs -> concat (map maybeToList xs);
+    catMaybes   = xs -> list.concat (list.map maybeToList xs);
     mapMaybe    = f -> maybe nothing (just << f);
 
     ----------------------------------------------------------------
     -- Either operations - smart constructors create closed variants
 
-    left        : forall a b. a -> <Left : a, Right : b>
+    left        : forall a b. a -> Either a b
                 = x -> Left x;
 
-    right       : forall a b. b -> <Left : a, Right : b>
+    right       : forall a b. b -> Either a b
                 = x -> Right x;
 
-    either      : forall a b c. (a -> c) -> (b -> c) -> <Left : a, Right : b> -> c
+    either      : forall a b c. (a -> c) -> (b -> c) -> Either a b -> c
                 = f g m -> case m of { Left a -> f a, Right b -> g b };
 
     ----------------------------------------------------------------
@@ -58,8 +57,8 @@ let
 
     and =  foldr (x y -> x && y) True;
     or  =  foldr (x y -> x || y) False;
-    any =  p -> or << map p;
-    all =  p -> and << map p;
+    any =  p -> or << list.map p;
+    all =  p -> and << list.map p;
 
     elem    = x -> any (x' -> x' == x);
     notElem = x -> all (x' -> x' /= x);
@@ -76,14 +75,8 @@ let
 -- Exports
 in { id
    , const
-   , map
-   , filter
-   , length
-   , foldl
-   , reverse
-   , concat
-   , intercalate
-   , intersperse
+   , list
+   , text
    , just
    , nothing
    , maybe

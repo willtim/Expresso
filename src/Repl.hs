@@ -16,7 +16,7 @@ module Main where
 
 import Control.Applicative
 import Control.Monad (forM_)
-import Control.Monad.IO.Class
+import Control.Monad.Except
 import Control.Monad.State.Strict
 import Data.Char
 import System.Console.Haskeline (InputT)
@@ -28,7 +28,7 @@ import qualified System.Console.Haskeline as HL
 import qualified Text.Parsec as P
 
 import Expresso
-import Expresso.Parser ( pExp, pLetDecl, topLevel
+import Expresso.Parser ( pExp, pLetDecl, pSynonymDecl, topLevel
                        , reserved, reservedOp, stringLiteral
                        )
 import Expresso.Utils
@@ -58,7 +58,8 @@ data Command
 data Line
   = Command Command
   | Term ExpI
-  | Decl (Bind Name, Maybe Type) ExpI
+  | Decl (Bind Name) (Maybe Type) ExpI
+  | TypeDecl SynonymDecl
   | NoOp
 
 type Repl = InputT (StateT ReplState IO)
@@ -105,11 +106,12 @@ repl = step repl
 process :: String -> Repl ()
 process str = do
   case parseLine str of
-    Left err                -> spew err
-    Right (Command c)       -> doCommand c
-    Right (Term e)          -> doEval showValue' e
-    Right (Decl (b, mty) e) -> doDecl b mty e
-    Right NoOp              -> return ()
+    Left err              -> spew err
+    Right (Command c)     -> doCommand c
+    Right (Term e)        -> doEval showValue' e
+    Right (Decl b mty e)  -> doDecl b mty e
+    Right (TypeDecl syn)  -> doTypeDecl syn
+    Right NoOp            -> return ()
  `HL.catch` handler
   where
     handler :: HL.SomeException -> Repl ()
@@ -180,6 +182,17 @@ doDecl b mty e = do
       Left err    -> spew err
       Right envs' -> lift $ modify (setEnv envs')
 
+doTypeDecl :: SynonymDecl -> Repl ()
+doTypeDecl syn = do
+  envs <- lift $ gets stateEnv
+  let envs'e = runExcept
+             . installSynonyms [syn]
+             . uninstallSynonym syn
+             $ envs
+  case envs'e of
+      Left err    -> spew err
+      Right envs' -> lift $ modify (setEnv envs')
+
 doTypeOf :: ExpI -> Repl ()
 doTypeOf e = do
     envs <- lift $ gets stateEnv
@@ -203,14 +216,17 @@ parseLine str
   | otherwise = showError $ P.parse (topLevel pLine) "<interactive>" str
 
 pLine :: Parser Line
-pLine = pCommand <|> P.try pTerm <|> pDecl
+pLine = pCommand <|> P.try pTerm <|> pDecl <|> pTypeDecl
 
 pTerm :: Parser Line
 pTerm = Term <$> pExp
 
 pDecl :: Parser Line
-pDecl = (uncurry Decl . first (either (,Nothing) (second Just)))
+pDecl = (\(b, mt, e) -> Decl b mt e)
     <$> (reserved "let" *> pLetDecl)
+
+pTypeDecl :: Parser Line
+pTypeDecl = TypeDecl <$> pSynonymDecl
 
 pCommand :: Parser Line
 pCommand = Command <$> (reservedOp ":" *> p)

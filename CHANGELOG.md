@@ -2,6 +2,7 @@
 
 ## 0.1.2.0
 
+- added type synonyms
 - let bindings can now be annotated with types
 - added a text append primitive
 
