@@ -97,6 +97,10 @@ Note that the function definition for `sqmag` above makes use of field punning. 
 
     λ> let sqmag = r -> r.x*r.x + r.y*r.y
 
+When matching on record arguments, sometimes it can be necessary to supply a new name to bind the values of a field to, for example:
+
+    λ> let add = {x=r, y=s} {x=u, y=v} -> {x = r + u, y = s + v}
+
 ### Record restriction
 
 We can remove a field by using the restriction primitive `\`. For example, the following will type-check:

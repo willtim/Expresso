@@ -53,7 +53,7 @@ data ExpF v b t r
 -- | Binders
 data Bind v
   = Arg v
-  | RecArg [v]
+  | RecArg [(v,v)]
   | RecWildcard
   deriving Show
 
@@ -89,9 +89,8 @@ data Prim
   | TextAppend
   | ListEmpty
   | ListCons
-  | ListNull    -- needed if list elems have no equality defined
+  | ListUncons
   | ListAppend
-  | ListFoldr
   | RecordEmpty -- a.k.a. Unit
   | RecordSelect Label
   | RecordExtend Label

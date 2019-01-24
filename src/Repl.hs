@@ -19,6 +19,7 @@ import Control.Monad (forM_)
 import Control.Monad.Except
 import Control.Monad.State.Strict
 import Data.Char
+import Data.Version
 import System.Console.Haskeline (InputT)
 import System.Console.Haskeline.MonadException ()
 import System.Directory
@@ -33,6 +34,8 @@ import Expresso.Parser ( pExp, pLetDecl, pSynonymDecl, topLevel
                        )
 import Expresso.Utils
 
+import Paths_expresso
+
 ps1 :: String
 ps1 = "λ"
 
@@ -42,6 +45,7 @@ data ReplState = ReplState
   { stateMode    :: Mode
   , stateBuffer  :: [String]
   , stateEnv     :: Environments
+  , stateLibDirs :: [FilePath]
   }
 
 data Command
@@ -66,11 +70,12 @@ type Repl = InputT (StateT ReplState IO)
 
 main :: IO ()
 main = do
-  cwd <- liftIO getCurrentDirectory
-  let preludePath = cwd </> "Prelude.x"
-  runRepl $ do
+  preludePath <- liftIO $ getDataFileName "Prelude.x"
+  currentDir  <- liftIO getCurrentDirectory
+  let libDirs = [takeDirectory preludePath, currentDir]
+  runRepl libDirs $ do
     mapM_ spew
-      [ "Expresso REPL"
+      [ unwords ["Expresso", showVersion version, "REPL"]
       , "Type :help or :h for a list of commands"
       ]
     HL.catch
@@ -117,23 +122,24 @@ process str = do
     handler :: HL.SomeException -> Repl ()
     handler ex = spew $ "Caught exception: " ++ show ex
 
-runRepl :: Repl a -> IO a
-runRepl m = do
+runRepl :: [FilePath] -> Repl a -> IO a
+runRepl libDirs m = do
     historyFile <- (</> ".expresso_history") <$> getHomeDirectory
     let settings = HL.defaultSettings {HL.historyFile = Just historyFile}
-    evalStateT (HL.runInputT settings m) emptyReplState
+    evalStateT (HL.runInputT settings m) (emptyReplState libDirs)
 
-emptyReplState :: ReplState
-emptyReplState = ReplState
-  { stateMode   = SingleLine
-  , stateBuffer = mempty
-  , stateEnv    = initEnvironments
+emptyReplState :: [FilePath] -> ReplState
+emptyReplState libDirs = ReplState
+  { stateMode    = SingleLine
+  , stateBuffer  = mempty
+  , stateEnv     = setLibDirs libDirs initEnvironments
+  , stateLibDirs = libDirs
   }
 
 loadPrelude :: FilePath -> Repl ()
 loadPrelude path = do
+  spew $ "Loading Prelude from " ++ path
   doLoad path
-  spew $ "Loaded Prelude from " ++ path
 
 doCommand :: Command -> Repl ()
 doCommand c = case c of
@@ -202,7 +208,9 @@ doTypeOf e = do
       Right sigma -> spew (showType sigma)
 
 doReset :: Repl ()
-doReset = lift $ modify (setEnv $ stateEnv emptyReplState)
+doReset = lift $ do
+    libDirs <- gets stateLibDirs
+    modify (setEnv $ setLibDirs libDirs initEnvironments)
 
 doDumpEnv :: Repl ()
 doDumpEnv = do

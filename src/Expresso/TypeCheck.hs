@@ -449,13 +449,14 @@ instWildcards = cataM alg
 tcBinds :: Pos -> Bind Name -> Maybe Rho -> TI (M.Map Name Type)
 tcBinds pos arg           Nothing   =
     newMetaVar pos CNone 'a' >>= tcBinds pos arg . Just
-tcBinds _   (Arg x)       (Just ty) =
-    return $ M.singleton x ty
-tcBinds pos (RecArg xs)   (Just ty) = do
-    tvs <- mapM (const $ newMetaVar pos CNone 'l') xs
-    r   <- newMetaVar pos (lacks xs) 'r' -- implicit tail
-    unify ty (TRecord $ mkRowType r $ zip xs tvs)
-    return $ M.fromList $ zip xs tvs
+tcBinds _   (Arg n)       (Just ty) =
+    return $ M.singleton n ty
+tcBinds pos (RecArg bs)   (Just ty) = do
+    let (ls, ns) = unzip bs
+    tvs <- mapM (const $ newMetaVar pos CNone 'l') ls
+    r   <- newMetaVar pos (lacks ls) 'r' -- implicit tail
+    unify ty (TRecord $ mkRowType r $ zip ls tvs)
+    return $ M.fromList $ zip ns tvs
 tcBinds pos RecWildcard   (Just ty) = do
     s <- gets tiSubst
     case apply s ty of
@@ -591,21 +592,23 @@ tcPrim pos prim = annotate pos $ case prim of
     in TForAll [a] $ TFun (TVar a)
                           (TFun (TList (TVar a))
                                 (TList (TVar a)))
-  ListFoldr              ->
-    let a = newTyVar CNone 'a'
-        b = newTyVar CNone 'b'
-    in TForAll [a,b] $ TFun (TFun (TVar a) (TFun (TVar b) (TVar b)))
-                            (TFun (TVar b)
-                                  (TFun (TList (TVar a))
-                                        (TVar b)))
-  ListNull               ->
-    let a = newTyVar CNone 'a'
-    in TForAll [a] $ TFun (TList (TVar a)) TBool
+  ListUncons             ->
+    let a     = newTyVar CNone 'a'
+        listT = TList (TVar a)
+        resT  = TRecord $ TRowExtend "head" (TVar a)
+                        $ TRowExtend "tail" listT
+                        $ TRowEmpty
+        unitT = TRecord TRowEmpty
+    in TForAll [a] $ TFun listT
+                          (TVariant $ TRowExtend "Just" resT
+                                    $ TRowExtend "Nothing" unitT
+                                    $ TRowEmpty)
   ListAppend             ->
     let a = newTyVar CNone 'a'
     in TForAll [a] $ TFun (TList (TVar a))
                           (TFun (TList (TVar a))
-                                (TList (TVar a))) -- TODO
+                                (TList (TVar a)))
+
   RecordEmpty            -> TRecord TRowEmpty
   (RecordSelect label)   ->
     let a = newTyVar CNone 'a'

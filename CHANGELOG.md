@@ -4,7 +4,10 @@
 
 - added type synonyms
 - let bindings can now be annotated with types
+- support field renaming during record matches
 - added a text append primitive
+- added a list uncons primitive
+- added example List and Text library modules
 
 ## 0.1.1.0
 

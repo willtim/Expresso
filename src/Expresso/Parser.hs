@@ -18,9 +18,11 @@
 module Expresso.Parser where
 
 import Control.Applicative
+import qualified Control.Exception as Ex
 import Control.Monad
 import Control.Monad.Except
 import Control.Monad.Writer
+import Data.Bifunctor
 import Data.Maybe
 import Text.Parsec hiding (many, optional, parse, (<|>))
 import Text.Parsec.Language (emptyDef)
@@ -30,6 +32,9 @@ import qualified Data.Text as T
 import qualified Text.Parsec as P
 import qualified Text.Parsec.Expr as P
 import qualified Text.Parsec.Token as P
+
+import System.FilePath
+import System.Directory
 
 import Expresso.Pretty ( Doc, (<+>), render, parensList
                        , text, dquotes, vcat)
@@ -41,20 +46,52 @@ import Expresso.Utils
 -- Resolve imports
 
 resolveImports
-    :: ExpI
+    :: [FilePath]
+    -> ExpI
+    -- NB: ExceptT models expected failures, e.g. file not found
     -> ExceptT String IO (Exp, [SynonymDecl])
-resolveImports = runWriterT . resolveImports'
+resolveImports libDirs = runWriterT . go
+  where
+    go :: ExpI -> WriterT [SynonymDecl] (ExceptT String IO) Exp
+    go = cataM alg
+      where
+        alg (InR (K (Import path)) :*: _) = do
+            (syns, e) <- lift $ do
+                str <- importFile path
+                ExceptT . return $ parse path str
+            tell syns
+            go e
+        alg (InL e :*: pos) = return $ Fix (e :*: pos)
 
-resolveImports'
-    :: ExpI
-    -> WriterT [SynonymDecl] (ExceptT String IO) Exp
-resolveImports' = cataM alg where
-  alg (InR (K (Import path)) :*: _) = do
-      (syns, e) <- lift . ExceptT
-          $ readFile path >>= return . parse path
-      tell syns
-      resolveImports' e
-  alg (InL e :*: pos) = return $ Fix (e :*: pos)
+    -- importFile searches the provided library dirs, unless
+    -- an absolute path is provided.
+    importFile :: FilePath -> ExceptT String IO String
+    importFile path
+        | isAbsolute path = readFile' path
+        | otherwise = do
+              mfp <- lift $ findFirst libDirs
+              case mfp of
+                  Just fp -> readFile' fp
+                  Nothing -> throwError $ unwords $
+                      [ "Could not find imported file"
+                      , "'" ++ path ++ "'"
+                      , "in the following library directories:"
+                      , show libDirs
+                      ]
+      where
+        findFirst :: [FilePath] -> IO (Maybe FilePath)
+        findFirst [] = return Nothing
+        findFirst (dir:dirs) = do
+            let fp = dir </> path
+            exists <- doesFileExist fp
+            if exists
+                then return (Just fp)
+                else findFirst dirs
+
+        readFile' :: FilePath -> ExceptT String IO String
+        readFile' fp =
+            ExceptT $ bimap (show :: Ex.SomeException -> String) id
+                  <$> Ex.try (readFile fp)
 
 ------------------------------------------------------------
 -- Parser
@@ -72,7 +109,7 @@ pTopLevel = (,) <$> many (pSynonymDecl <* semi) <*> pExp
 pSynonymDecl = SynonymDecl
        <$> getPosition
        <*> (reserved "type" *> upperIdentifier)
-       <*> many1 pTyVar
+       <*> many pTyVar
        <*> (reservedOp "=" *> pType)
 
 pExp     = addTypeAnnot
@@ -191,8 +228,7 @@ pPrimFun = msum
   [ fun "error"   ErrorPrim
   , fun "show"    Show
   , fun "not"     Not
-  , fun "foldr"   ListFoldr
-  , fun "null"    ListNull
+  , fun "uncons"  ListUncons
   , fun "fix"     FixPrim
   , fun "double"  Double
   , fun "floor"   Floor
@@ -231,11 +267,16 @@ pString = (\pos -> mkPrim pos . Text . T.pack)
        <*> stringLiteral
 
 pBind = Arg <$> lowerIdentifier
-    <|> RecArg <$> pFieldPuns
+    <|> RecArg <$> pFieldBind
 
 pLetBind = try (RecWildcard <$ reservedOp "{..}") <|> pBind
 
-pFieldPuns = braces $ pRecordLabel `sepBy` comma
+pFieldBind = braces $ pFieldBind' `sepBy` comma
+  where
+    pFieldBind'
+         = mkFieldBind
+        <$> pRecordLabel
+        <*> optionMaybe (reservedOp "=" *> lowerIdentifier)
 
 data Entry = Extend Label ExpI | Update Label ExpI
 
@@ -302,6 +343,10 @@ pList = brackets pListBody
         <$> getPosition
         <*> ((,) <$> getPosition <*> pExp) `sepBy` comma
         <?> "list expression"
+
+mkFieldBind :: Name -> Maybe Name -> (Name, Name)
+mkFieldBind l (Just n) = (l, n)
+mkFieldBind l Nothing  = (l, l)
 
 mkImport :: Pos -> FilePath -> ExpI
 mkImport pos path = withAnn pos $ InR $ K $ Import path

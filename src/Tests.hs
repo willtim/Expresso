@@ -7,6 +7,8 @@ import qualified Data.HashMap.Strict as HashMap
 
 import Expresso
 
+import Paths_expresso
+
 main = defaultMain unitTests
 
 unitTests = testGroup
@@ -133,7 +135,7 @@ constraintTests = testGroup
 rankNTests = testGroup
   "Rank-N polymorphism"
   [ hasValue "let f = (g : forall a. a -> a) -> {l = g True, r = g 1} in f (x -> x) == {l = True, r = 1}" True
-  , hasValue "let f = g -> {l = g True, r = g 1} : (forall a. a -> a) -> {l : Bool, r : Int } in f (x -> x) == {l = True, r = 1}" True , hasValue "let f = (m : forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = pack (m.reverse (unpack \"abc\")) } in f (import \"Prelude.x\").list == {l = [False, True], r = \"cba\"}" True
+  , hasValue "let f = g -> {l = g True, r = g 1} : (forall a. a -> a) -> {l : Bool, r : Int } in f (x -> x) == {l = True, r = 1}" True , hasValue "let f = (m : forall a. { reverse : [a] -> [a] |_}) -> {l = m.reverse [True, False], r = pack (m.reverse (unpack \"abc\")) } in f (import \"List.x\") == {l = [False, True], r = \"cba\"}" True
   ]
 
 lazyTests = testGroup
@@ -145,7 +147,9 @@ lazyTests = testGroup
 
 hasValue :: (Eq a, Show a, HasValue a) => String -> a -> TestTree
 hasValue str expected = testCase str $ do
-    result <- evalString Nothing str
+    libDir <- getDataDir
+    let envs = setLibDirs [libDir] initEnvironments
+    result <- evalString' envs Nothing str
     case result of
         Left err     -> assertFailure err
         Right actual -> assertEqual "" expected actual

@@ -11,14 +11,19 @@ let
     flip  = f x y -> (f y x);
 
     ----------------------------------------------------------------
-    -- List operations
+    -- Basic list operations
 
-    list        = import "List.x";
-
-    ----------------------------------------------------------------
-    -- Text operations
-
-    text        = import "Text.x";
+    foldr       = f z -> fix (r xs ->
+                           case uncons xs of
+                             { Nothing{}         -> z
+                             , Just {head, tail} -> f head (r tail)
+                             });
+    null        = xs -> case uncons xs of { Nothing{} -> True, Just{} -> False };
+    map         = f -> foldr (x xs -> f x :: xs) [];
+    filter      = f -> foldr (x xs -> if f x then (x::xs) else xs);
+    length      = foldr (const (n -> 1 + n)) 0;
+    foldl       = f z xs -> foldr (x xsf r -> xsf (f r x)) id xs z;
+    concat      = xss -> foldr (xs ys -> xs ++ ys) [] xss;
 
     ----------------------------------------------------------------
     -- Maybe operations - smart constructors create closed variants
@@ -37,7 +42,7 @@ let
     fromMaybe   = x -> maybe x id;
     listToMaybe = foldr (x -> const (just x)) nothing;
     maybeToList = maybe [] (x -> [x]);
-    catMaybes   = xs -> list.concat (list.map maybeToList xs);
+    catMaybes   = xs -> concat (map maybeToList xs);
     mapMaybe    = f -> maybe nothing (just << f);
 
     ----------------------------------------------------------------
@@ -57,8 +62,8 @@ let
 
     and =  foldr (x y -> x && y) True;
     or  =  foldr (x y -> x || y) False;
-    any =  p -> or << list.map p;
-    all =  p -> and << list.map p;
+    any =  p -> or << map p;
+    all =  p -> and << map p;
 
     elem    = x -> any (x' -> x' == x);
     notElem = x -> all (x' -> x' /= x);
@@ -75,8 +80,13 @@ let
 -- Exports
 in { id
    , const
-   , list
-   , text
+   , foldr
+   , null
+   , map
+   , filter
+   , length
+   , foldl
+   , concat
    , just
    , nothing
    , maybe

@@ -59,6 +59,7 @@ module Expresso
   , installSynonyms
   , uninstallSynonym
   , runEvalM
+  , setLibDirs
   , showType
   , showValue
   , showValue'
@@ -96,15 +97,16 @@ import qualified Expresso.Parser as Parser
 
 -- | Type and term environments.
 data Environments = Environments
-    { envsTypeEnv  :: !TypeEnv
+    { envsLibDirs  :: ![FilePath]
+    , envsTypeEnv  :: !TypeEnv
     , envsSynonyms :: !Synonyms
     , envsTIState  :: !TIState
     , envsTermEnv  :: !Env
     }
 
--- | Empty initial type and term environments.
+-- | Empty initial environments.
 initEnvironments :: Environments
-initEnvironments = Environments mempty mempty initTIState mempty
+initEnvironments = Environments [] mempty mempty initTIState mempty
 
 -- | Install a binding using the supplied name, type and term.
 -- Useful for extending the set of built-in functions.
@@ -116,8 +118,8 @@ installBinding name ty val envs =
 
 -- | Query the type of an expression using the supplied type environment.
 typeOfWithEnv :: Environments -> ExpI -> IO (Either String Type)
-typeOfWithEnv (Environments tEnv syns tState _) ei = runExceptT $ do
-    (e, ss) <- Parser.resolveImports ei
+typeOfWithEnv (Environments libDirs tEnv syns tState _) ei = runExceptT $ do
+    (e, ss) <- Parser.resolveImports libDirs ei
     syns'   <- insertSynonyms ss syns
     ExceptT $ return $ inferTypes tEnv syns' tState e
 
@@ -137,8 +139,8 @@ evalWithEnv
     => Environments
     -> ExpI
     -> IO (Either String a)
-evalWithEnv (Environments tEnv syns tState env) ei = runExceptT $ do
-    (e, ss) <- Parser.resolveImports ei
+evalWithEnv (Environments libDirs tEnv syns tState env) ei = runExceptT $ do
+    (e, ss) <- Parser.resolveImports libDirs ei
     syns'   <- insertSynonyms ss syns
     _sigma  <- ExceptT . return $ inferTypes tEnv syns' tState e
     ExceptT $ runEvalM . (Eval.eval env >=> Eval.proj) $ e
@@ -186,8 +188,8 @@ bind
     -> Maybe Type
     -> ExpI
     -> EvalM Environments
-bind (Environments tEnv syns tState env) b mty ei = do
-    (e, ss) <- Parser.resolveImports ei
+bind (Environments libDirs tEnv syns tState env) b mty ei = do
+    (e, ss) <- Parser.resolveImports libDirs ei
     syns'   <- insertSynonyms ss syns
     let (res'e, tState') =
             TypeCheck.runTI (TypeCheck.tcDecl (getAnn ei) b mty e) tEnv syns' tState
@@ -196,7 +198,7 @@ bind (Environments tEnv syns tState env) b mty ei = do
         Right tEnv' -> do
             thunk <- Eval.mkThunk $ Eval.eval env e
             env'  <- Eval.bind env b thunk
-            return $ Environments tEnv' syns' tState' env'
+            return $ Environments libDirs tEnv' syns' tState' env'
 
 -- | Pretty print the supplied type.
 showType :: Type -> String
@@ -223,6 +225,12 @@ inferTypes
 inferTypes tEnv syns tState e =
     fst $ TypeCheck.runTI (TypeCheck.typeCheck e) tEnv syns tState
 
+-- | Set the library paths used when resolving relative imports.
+setLibDirs :: [FilePath] -> Environments -> Environments
+setLibDirs libDirs envs =
+    envs { envsLibDirs = libDirs }
+
+-- | Install the supplied type synonym declarations.
 installSynonyms
     :: MonadError String m
     => [SynonymDecl]

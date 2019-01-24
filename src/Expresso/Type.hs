@@ -140,7 +140,7 @@ data SynonymDecl = SynonymDecl
     , synonymName   :: Name
     , synonymParams :: [TyVar]
     , synonymBody   :: Type
-    } deriving (Typeable, Data)
+    } deriving (Show, Typeable, Data)
 
 -- | Lookup and expand a type synonym.
 -- Returns Nothing if the lookup or expansion failed.
@@ -165,14 +165,16 @@ insertSynonyms ss (Synonyms m) =
     Synonyms <$> foldM f m ss
   where
     f m syn
-        | Just syn' <- M.lookup (synonymName syn) m =
+        | Just syn' <- M.lookup (synonymName syn) m
+        -- check that it's not a benign re-import of the same synonym
+        , (fields syn /= fields syn') =
             throwError $ unwords
                 [ "Duplicate synonyms with name"
                 , "'" ++ synonymName syn ++ "'"
                 , "at"
-                , show (synonymPos syn)
+                , show syn --(synonymPos syn)
                 , "and"
-                , show (synonymPos syn')
+                , show syn' -- (synonymPos syn')
                 ]
         | fvs <- ftv (synonymBody syn)
             S.\\ S.fromList (synonymParams syn)
@@ -184,6 +186,9 @@ insertSynonyms ss (Synonyms m) =
                 , show (synonymPos syn)
                 ]
         | otherwise = return $ M.insert (synonymName syn) syn m
+
+    -- strip positional annotations
+    fields (SynonymDecl _ name vars body) = (name, vars, stripAnn body)
 
 instance View TypeF Type where
   proj    = left . unFix
@@ -438,7 +443,9 @@ ppType :: Type -> Doc
 ppType (TForAll vs t)     = ppForAll (vs, t)
 ppType (TVar v)           = text $ tyvarName v
 ppType (TMetaVar v)       = "v" <> int (metaUnique v)
-ppType (TSynonym n ts)    = text n <+> hsep (map (ppType' tcPrec) ts)
+ppType (TSynonym n ts)
+    | null ts             = text n
+    | otherwise           = text n <+> hsep (map (ppType' tcPrec) ts)
 ppType TInt               = "Int"
 ppType TDbl               = "Double"
 ppType TBool              = "Bool"

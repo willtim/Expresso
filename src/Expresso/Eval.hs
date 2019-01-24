@@ -269,19 +269,17 @@ evalPrim pos p = case p of
         VText <$> ((<>) <$> proj' xs <*> proj' ys)
 
     ListEmpty     -> VList []
-    ListNull      -> VLam $ \xs ->
-        (VBool . (null :: [Value] -> Bool)) <$> proj' xs
     ListCons      -> VLam $ \x -> return $ VLam $ \xs ->
         VList <$> ((:) <$> force x <*> proj' xs)
+    ListUncons    -> mkStrictLam $ \case
+            VList (x:xs) ->
+                return $ mkVariant "Just" (mkRecord
+                                           [ ("head", Thunk $ return x)
+                                           , ("tail", Thunk . return $ VList xs)])
+            VList []     -> return $ mkVariant "Nothing" unit
+            v            -> failOnValues pos [v]
     ListAppend    -> VLam $ \xs -> return $ VLam $ \ys ->
         VList <$> ((++) <$> proj' xs <*> proj' ys)
-    ListFoldr     -> mkStrictLam $ \f ->
-        return $ VLam $ \z -> return $ VLam $ \xs -> do
-        let g a b = do g' <- evalApp pos f (Thunk $ return a)
-                       evalApp pos g' (Thunk $ return b)
-        z'  <- force z
-        xs' <- proj' xs :: EvalM [Value]
-        foldrM g z' xs'
 
     RecordExtend l   -> VLam $ \v -> return $ VLam $ \r ->
         (VRecord . HashMap.insert l v) <$> proj' r
@@ -316,12 +314,13 @@ bind' :: Env -> Bind Name -> Thunk -> EvalM Env
 bind' env b t = do
   v <- force t
   case (b, v) of
-    (Arg n, _)               ->
+    (Arg n, _) ->
         return $ insertEnv n (Thunk $ return v) env
-    (RecArg ns, VRecord m) | Just vs <- mapM (\n -> HashMap.lookup n m) ns ->
-        return $ env <> (mkEnv $ zip ns vs)
+    (RecArg (unzip -> (ls, ns)), VRecord m)
+        | Just vs <- mapM (\l -> HashMap.lookup l m) ls ->
+          return $ (mkEnv $ zip ns vs) <> env
     (RecWildcard, VRecord m) ->
-        return $ env <> Env m
+        return $ Env m <> env
     _ -> throwError $ "Cannot bind the pair: " ++ show b ++ " = " ++ show (ppValue v)
 
 insertEnv :: Name -> Thunk -> Env -> Env
