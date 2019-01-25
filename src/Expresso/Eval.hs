@@ -50,7 +50,6 @@ module Expresso.Eval(
 where
 
 import Control.Monad.Except
-import Data.Foldable (foldrM)
 import Data.HashMap.Strict (HashMap)
 import Data.IORef
 import Data.Ord
