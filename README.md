@@ -263,7 +263,7 @@ is actually sugar for:
 
 ## A data-exchange format with schemas
 
-We could use Expresso as a lightweight data-exchange format (i.e. JSON with types). But how might be validate terms against a schema?
+We could use Expresso as a lightweight data-exchange format (i.e. JSON with types). But how might we validate terms against a schema?
 
 A simple type annotation `<term> : <type>` , will not suffice for "schema validation". For example, consider this attempt at validating an integer against a schema that permits everything:
 
