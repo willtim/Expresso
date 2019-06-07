@@ -24,7 +24,8 @@ module Expresso.Pretty (
 import Data.String
 import Text.PrettyPrint.Leijen ( Doc, (<+>), (<//>), angles, braces, brackets
                                , comma, dot, dquotes, empty, hcat, hsep, indent
-                               , int, integer, double, parens, space, text, string, vcat)
+                               , int, integer, double, parens, space, text, string
+                               , squotes, vcat)
 import qualified Text.PrettyPrint.Leijen as PP
 
 instance IsString Doc where

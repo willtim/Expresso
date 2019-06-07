@@ -242,9 +242,9 @@ expandSynonym pos name args = do
 
 unifyRow :: Type -> Type -> TI Subst
 unifyRow row1@TRowExtend{} row2@TRowEmpty = throwError' $
-    [ ppPos (getAnn row1) <+> ": unexpected row label(s)"
-      <+> hcat (L.intersperse comma (map text . M.keys . rowToMap $ row1))
-    , "at" <+> ppPos (getAnn row2)
+    [ "Cannot unify the row at" <+> ppPos (getAnn row1)
+    , "with the row at" <+> ppPos (getAnn row2)
+    , "due to the row label(s)" <+> ppRowLabels row1
     ]
 unifyRow row1@(TRowExtend label1 fieldTy1 rowTail1) row2@TRowExtend{} = do
   -- apply side-condition to ensure termination

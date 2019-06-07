@@ -36,6 +36,7 @@ import Data.Foldable (fold)
 import Data.IntMap (IntMap)
 import Data.Map (Map)
 import Data.Set (Set)
+import qualified Data.List as L
 import qualified Data.Map as M
 import qualified Data.IntMap as IM
 import qualified Data.Set as S
@@ -467,6 +468,10 @@ ppRowType r = sepBy comma (map ppEntry ls)
     ppRowTail [] v = ppType v
     ppRowTail _  v = mempty <+> "|" <+> ppType v
     ppEntry (l, t) = text l <+> ":" <+> ppType t
+
+ppRowLabels :: Type -> Doc
+ppRowLabels row =
+    hcat $ map squotes (L.intersperse comma (map text . M.keys . rowToMap $ row))
 
 ppForAll :: ([TyVar], Type) -> Doc
 ppForAll (vars, t)
