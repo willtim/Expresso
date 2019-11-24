@@ -18,6 +18,7 @@ Expresso has the following features:
 - Whitespace insensitive syntax
 - Type annotations to support first-class modules and schema validation use cases
 - Built-in support for ints, double, bools, chars and lists
+- Support for fixed-points (useful for dynamic binding), but without recursive records.
 
 ## Installation
 

@@ -4,10 +4,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE PatternGuards #-}
-{-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE TypeSynonymInstances #-}
-{-# LANGUAGE ViewPatterns #-}
 {-# OPTIONS_GHC -fmax-pmcheck-iterations=10000000 #-}
 
 -- |
@@ -78,8 +75,8 @@ runTI
     -> Synonyms
     -> TIState
     -> (Either String a, TIState)
-runTI t tEnv syns tState =
-    runState (runReaderT (runExceptT t) (TIEnv tEnv syns)) tState
+runTI t tEnv syns =
+    runState (runReaderT (runExceptT t) (TIEnv tEnv syns))
 
 -- | Initial state of the inference engine.
 initTIState :: TIState
@@ -125,7 +122,7 @@ lookupVar pos name = do
     TypeEnv env <- asks tiTypeEnv
     case M.lookup name env of
         Just s  -> return s
-        Nothing -> throwError $ show $
+        Nothing -> throwError . show $
             ppPos pos <+> ": unbound variable:" <+> text name
 
 extendEnv :: M.Map Name Sigma -> TI a -> TI a
@@ -154,7 +151,7 @@ quantify pos mvs0 t =
     mkSubsts p mvs =
         zipWith mkSubst mvs (prefixBndrs L.\\ usedBndrs)
       where
-        prefixBndrs = [p] : [ (p:show i) | i <- [(1::Integer)..]]
+        prefixBndrs = [p] : [ p : show i | i <- [(1::Integer)..]]
         mkSubst mv name =
             (mv, TyVar Bound name p (metaConstraint mv))
 
@@ -241,7 +238,7 @@ expandSynonym pos name args = do
             ]
 
 unifyRow :: Type -> Type -> TI Subst
-unifyRow row1@TRowExtend{} row2@TRowEmpty = throwError' $
+unifyRow row1@TRowExtend{} row2@TRowEmpty = throwError'
     [ "Cannot unify the row at" <+> ppPos (getAnn row1)
     , "with the row at" <+> ppPos (getAnn row2)
     , "due to the row label(s)" <+> ppRowLabels row1
@@ -307,11 +304,11 @@ varBindRow pos u t
   = case S.toList (ls `S.intersection` ls') of
       [] | Nothing <- mv -> return s1
          | Just r1 <- mv -> do
-             let c = ls `S.union` (labelsFrom r1)
+             let c = ls `S.union` labelsFrom r1
              r2 <- newMetaVar pos (CRow c) 'r'
              let s2 = r1 |-> r2
              return $ s1 <> s2
-      labels             -> throwError $ show $
+      labels             -> throwError . show $
                                 ppPos pos <+> ": repeated label(s):"
                                           <+> sepBy comma (map text labels)
   where
@@ -324,14 +321,17 @@ varBindRow pos u t
 
 rewriteRow :: Pos -> Pos -> Type -> Label -> TI (Type, Type, Subst)
 rewriteRow pos1 pos2 (Fix (TRowEmptyF :*: _)) newLabel =
-  throwError $ show $
-      ppPos pos1 <+> ": label" <+> text newLabel <+> "cannot be inserted into row type introduced at" <+> ppPos pos2
+  throwError . show $
+      ppPos pos1 <+> ": label"
+                 <+> text newLabel
+                 <+> "cannot be inserted into row type introduced at"
+                 <+> ppPos pos2
 rewriteRow pos1 pos2 (Fix (TRowExtendF label fieldTy rowTail :*: K pos)) newLabel
   | newLabel == label     =
       -- nothing to do
       return (fieldTy, rowTail, nullSubst)
   | TVar v <- rowTail, tyvarFlavour v == Skolem =
-      throwError $ show $ vcat $
+      throwError . show $ vcat
           [ ppPos pos1 <+> ": Type not polymorphic enough:"
           , ppPos pos2
           ]
@@ -462,8 +462,9 @@ tcBinds pos RecWildcard   (Just ty) = do
     case apply s ty of
         TRecord r -> return $ rowToMap r
         _         ->
-            throwError $ show $
-                ppPos pos <+> ": record wildcard cannot bind to type:" <+> ppType ty
+            throwError . show $
+                ppPos pos <+> ": record wildcard cannot bind to type:"
+                          <+> ppType ty
 
 
 subsCheck :: Pos -> Sigma -> Sigma -> TI ()

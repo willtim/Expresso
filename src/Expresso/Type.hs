@@ -13,7 +13,6 @@
 {-# LANGUAGE TupleSections #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE TypeOperators #-}
-{-# LANGUAGE TypeSynonymInstances #-}
 {-# LANGUAGE ViewPatterns #-}
 
 -- |
@@ -35,11 +34,14 @@ import Data.Data
 import Data.Foldable (fold)
 import Data.IntMap (IntMap)
 import Data.Map (Map)
+import Data.Maybe
 import Data.Set (Set)
+import qualified Data.Graph as Graph
 import qualified Data.List as L
 import qualified Data.Map as M
-import qualified Data.IntMap as IM
 import qualified Data.Set as S
+import qualified Data.Tree as Tree
+import qualified Data.IntMap as IM
 
 import Text.Parsec (SourcePos)
 import Text.Parsec.Pos (newPos)
@@ -156,19 +158,29 @@ deleteSynonym :: Name -> Synonyms -> Synonyms
 deleteSynonym name (Synonyms m) =
     Synonyms $ M.delete name m
 
--- | Checks for duplicate synonym names and free variables.
+-- | Checks for duplicate synonym names, loops/cycles and free variables.
 insertSynonyms
     :: MonadError String m
     => [SynonymDecl]
     -> Synonyms
     -> m Synonyms
-insertSynonyms ss (Synonyms m) =
-    Synonyms <$> foldM f m ss
+insertSynonyms ss (Synonyms m) = do
+    m' <- foldM f m ss
+    case findLoops m' of
+        ([],[]) -> return $ Synonyms m'
+        (selfLoops,loops) ->
+            throwError . unlines $
+            [ "Recursive synonym definitions are not supported: " <> loop
+            | loop    <- selfLoops
+            ] ++
+            [ "Mutually recursive synonym definitions are not supported: " <> L.intercalate "," nms
+            | nms <- loops
+            ]
   where
     f m syn
         | Just syn' <- M.lookup (synonymName syn) m
         -- check that it's not a benign re-import of the same synonym
-        , (fields syn /= fields syn') =
+        , fields syn /= fields syn' =
             throwError $ unwords
                 [ "Duplicate synonyms with name"
                 , "'" ++ synonymName syn ++ "'"
@@ -190,6 +202,38 @@ insertSynonyms ss (Synonyms m) =
 
     -- strip positional annotations
     fields (SynonymDecl _ name vars body) = (name, vars, stripAnn body)
+
+    -- Find loops in the graphs (recursive synonyms are not allowed).
+    findLoops m = (selfLoops, loops)
+      where
+        -- Find self-loops
+        selfLoops = mapMaybe ((`M.lookup` vertexToName) . fst)
+                  . filter (uncurry (==))
+                  $ edges
+
+        -- We look for all the strongly connected components that
+        -- are not singleton lists.
+        loops  = mapMaybe (mapM (`M.lookup` vertexToName))
+               . filter ((>1) . length)
+               . map Tree.flatten
+               . Graph.scc
+               . Graph.buildG (0, M.size m)
+               $ edges
+
+        edges = [ (v1, v2) -- edge
+                | (nm, v1) <- M.toList nameToVertex
+                , nm'      <- maybe [] (S.toList . namesFromBody) $ M.lookup nm m
+                , Just v2  <- [M.lookup nm' nameToVertex]
+                ]
+
+        vertexToName = M.fromList $ zip [0..] (M.keys m)
+        nameToVertex = M.fromList $ zip (M.keys m) [0..]
+
+        namesFromBody = cata alg . stripAnn . synonymBody where
+            alg :: TypeF (Set Name) -> Set Name
+            alg (TSynonymF n ns) = S.insert n (S.unions ns)
+            alg t                = fold t
+
 
 instance View TypeF Type where
   proj    = left . unFix
@@ -246,13 +290,13 @@ class Types a where
 
 instance Types Type where
   ftv = cata alg . stripAnn where
-    alg :: TypeF (Set TyVar) -> (Set TyVar)
+    alg :: TypeF (Set TyVar) -> Set TyVar
     alg (TForAllF vs t) = t S.\\ S.fromList vs
     alg (TVarF v)       = S.singleton v
     alg e               = fold e
 
   meta = cata alg . stripAnn where
-    alg :: TypeF (Set MetaTv) -> (Set MetaTv)
+    alg :: TypeF (Set MetaTv) -> Set MetaTv
     alg (TMetaVarF v) = S.singleton v
     alg e             = fold e
 
@@ -278,7 +322,7 @@ instance Types a => Types [a] where
 -- when quantifying an outer forall, we can avoid these inner ones.
 tyVarBndrs :: Type -> Set TyVar
 tyVarBndrs = cata alg . stripAnn where
-    alg :: TypeF (Set TyVar) -> (Set TyVar)
+    alg :: TypeF (Set TyVar) -> Set TyVar
     alg (TForAllF vs t) = t <> S.fromList vs
     alg (TFunF arg res) = arg <> res
     alg _               = S.empty
@@ -290,15 +334,14 @@ substTyVar tvs ts t = cata alg t m where
       -> Map Name Type
       -> Type
   alg (TForAllF vs f :*: K p) m  =
-      let m' = foldr M.delete m (map tyvarName vs)
+      let m' = foldr (M.delete . tyvarName) m vs
       in Fix (TForAllF vs (f m') :*: K p)
   alg (TVarF v :*: K p) m =
-        case M.lookup (tyvarName v) m of
-            Nothing -> Fix (TVarF v :*: K p)
-            Just t  -> t
+        fromMaybe (Fix (TVarF v :*: K p))
+            $ M.lookup (tyvarName v) m
   alg e m = Fix $ fmap ($m) e
 
-  m = M.fromList $ (map tyvarName tvs) `zip` ts
+  m = M.fromList $ map tyvarName tvs `zip` ts
 
 newtype Subst = Subst { unSubst :: IntMap Type }
   deriving (Show)
@@ -315,12 +358,12 @@ isInSubst v = IM.member (metaUnique v) . unSubst
 
 removeFromSubst :: [MetaTv] -> Subst -> Subst
 removeFromSubst vs (Subst m) =
-    Subst $ foldr IM.delete m (map metaUnique vs)
+    Subst $ foldr (IM.delete . metaUnique) m vs
 
 -- | apply s1 and then s2
 -- NB: order is important
 composeSubst :: Subst -> Subst -> Subst
-composeSubst s1 s2 = Subst $ (IM.map (apply s1) $ unSubst s2) `IM.union` unSubst s1
+composeSubst s1 s2 = Subst $ IM.map (apply s1) (unSubst s2) `IM.union` unSubst s1
 
 instance Semigroup Subst where
     (<>) = composeSubst
@@ -431,7 +474,9 @@ atomicPrec = 3  -- Precedence of t
 precType :: Type -> Precedence
 precType (TForAll _ _)  = topPrec
 precType (TFun _ _)     = arrPrec
-precType (TSynonym _ _) = tcPrec
+precType (TSynonym _ ts)
+    | null ts           = atomicPrec
+    | otherwise         = tcPrec
 precType _              = atomicPrec
 
 -- | Print with parens if precedence arg > precedence of type itself
@@ -476,7 +521,7 @@ ppRowLabels row =
 ppForAll :: ([TyVar], Type) -> Doc
 ppForAll (vars, t)
   | null vars = ppType' topPrec t
-  | otherwise = "forall" <+> (hsep $ map (ppType . TVar) vars) <> dot
+  | otherwise = "forall" <+> hsep (map (ppType . TVar) vars) <> dot
                          <>  (let cs = concatMap ppConstraint vars
                               in if null cs then mempty else space <> (parensList cs <+> "=>"))
                          <+> ppType' topPrec t
