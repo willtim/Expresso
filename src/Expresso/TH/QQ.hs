@@ -42,7 +42,7 @@ def = QuasiQuoter
     }
   where
     failure kind =
-        fail $ "This quasi-quoter does not support splicing " ++ kind
+        error $ "This quasi-quoter does not support splicing " ++ kind
 
 genTypeAnn :: String -> ExpQ
 genTypeAnn str = do
