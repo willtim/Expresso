@@ -1,5 +1,9 @@
 # Change Log
 
+## 0.1.3.0
+
+- Compilation with GHC 8.8.3
+
 ## 0.1.2.0
 
 - added type synonyms
